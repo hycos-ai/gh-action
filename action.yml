@@ -1,0 +1,53 @@
+name: 'Build Log Analyzer'
+description: 'Uploads GitHub build logs to AWS S3 and analyzes them for issues'
+author: 'Your Name'
+
+inputs:
+  github-token:
+    description: 'GitHub token for accessing workflow runs and logs'
+    required: true
+  aws-access-key-id:
+    description: 'AWS Access Key ID for S3 upload'
+    required: true
+  aws-secret-access-key:
+    description: 'AWS Secret Access Key for S3 upload'
+    required: true
+  aws-region:
+    description: 'AWS region for S3 bucket'
+    required: true
+    default: 'us-east-1'
+  s3-bucket:
+    description: 'S3 bucket name for log storage'
+    required: true
+  s3-key-prefix:
+    description: 'S3 key prefix for organizing logs'
+    required: false
+    default: 'build-logs'
+  workflow-run-id:
+    description: 'Specific workflow run ID to analyze (optional, defaults to current run)'
+    required: false
+  analysis-api-endpoint:
+    description: 'Custom API endpoint for log analysis (currently commented out)'
+    required: false
+  analysis-timeout:
+    description: 'Timeout for analysis in seconds'
+    required: false
+    default: '300'
+
+outputs:
+  s3-url:
+    description: 'S3 URL where logs were uploaded'
+  analysis-status:
+    description: 'Status of the analysis (success, failed, timeout)'
+  issues-found:
+    description: 'Number of issues found in the analysis'
+  analysis-results:
+    description: 'JSON string containing analysis results'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+
+branding:
+  icon: 'search'
+  color: 'blue' 
