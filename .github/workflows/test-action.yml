@@ -1,0 +1,86 @@
+name: Test Build Log Analyzer Action
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: # Manual trigger for testing
+
+jobs:
+  # Create some sample logs with errors/warnings for testing
+  generate-test-logs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          npm install
+          echo "✅ Dependencies installed successfully"
+
+      - name: Generate test logs with issues
+        run: |
+          echo "🔧 Running build process..."
+          echo "WARNING: Deprecated function usage detected"
+          echo "ERROR: Failed to compile module xyz"
+          echo "FATAL: Critical system failure detected"
+          echo "Build process completed with issues"
+
+      - name: Run tests (simulate failure)
+        run: |
+          echo "Running test suite..."
+          echo "Test 1: PASSED"
+          echo "Test 2: FAILED - assertion error"
+          echo "Test 3: WARNING - slow test detected"
+          # Simulate a test failure
+          exit 1
+        continue-on-error: true
+
+  # Test the log analyzer action
+  test-log-analyzer:
+    runs-on: ubuntu-latest
+    needs: [generate-test-logs]
+    if: always() # Run even if previous job fails
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test Build Log Analyzer Action
+        uses: ./ # Use the local action
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # ⚠️ HARDCODED CREDENTIALS - FOR TESTING ONLY!
+          # Replace these with your actual AWS credentials
+          aws-access-key-id: 'AKIA5MSUBYAQVFXAJHEQ'
+          aws-secret-access-key: 'YqKhO7wUE5G30htulrkLI0qwEAFQbWf5KSXL1YWrb'
+          aws-region: 'us-east-1'
+          s3-bucket: 'gh-action-test-bucker'
+          s3-key-prefix: 'github-action-test-logs'
+          analysis-timeout: '60' # Shorter timeout for testing
+        id: log-analysis
+
+      - name: Display Test Results
+        run: |
+          echo "🎯 Test Results:"
+          echo "Analysis Status: ${{ steps.log-analysis.outputs.analysis-status }}"
+          echo "Issues Found: ${{ steps.log-analysis.outputs.issues-found }}"
+          echo "S3 URL: ${{ steps.log-analysis.outputs.s3-url }}"
+          echo ""
+          echo "📊 Full Analysis Results:"
+          echo '${{ steps.log-analysis.outputs.analysis-results }}' | jq '.'
+
+      - name: Verify Results
+        run: |
+          if [ "${{ steps.log-analysis.outputs.analysis-status }}" = "success" ]; then
+            echo "✅ Action completed successfully!"
+          else
+            echo "❌ Action failed!"
+            exit 1
+          fi
