@@ -1,14 +1,24 @@
 import * as core from '@actions/core';
-import axios from 'axios';
-import { AnalysisResult, LogContent, S3UploadResult } from './types';
+import axios, { AxiosError, AxiosResponse } from 'axios';
+import { AuthClient } from './auth-client';
+import { AnalysisResult, ApiErrorResponse, LogContent, S3UploadResult } from './types';
 
 export class AnalysisClient {
   private apiEndpoint: string;
   private timeout: number;
+  private authClient: AuthClient | null = null;
 
-  constructor(apiEndpoint: string, timeout: number = 300) {
+  constructor(apiEndpoint: string, timeout: number = 300, authClient?: AuthClient) {
     this.apiEndpoint = apiEndpoint;
     this.timeout = timeout * 1000; // Convert to milliseconds
+    this.authClient = authClient || null;
+  }
+
+  /**
+   * Set authentication client
+   */
+  setAuthClient(authClient: AuthClient): void {
+    this.authClient = authClient;
   }
 
   /**
@@ -29,8 +39,7 @@ export class AnalysisClient {
   }
 
   /**
-   * Call custom API endpoint for log analysis
-   * Currently commented out as requested - uncomment and modify as needed
+   * Call API endpoint for log analysis with authentication
    */
   async analyzeLogsWithAPI(
     logs: LogContent[],
@@ -44,59 +53,71 @@ export class AnalysisClient {
     const progressInterval = this.showAnalysisProgress();
 
     try {
-      core.info(`🚀 Starting analysis with custom API endpoint`);
+      core.info(`🚀 Starting analysis with API endpoint: ${this.apiEndpoint}`);
       core.info(`📊 Analyzing ${logs.length} log files from workflow: ${workflowInfo.name}`);
 
-      /*
-      // CUSTOM API INTEGRATION - UNCOMMENT AND MODIFY AS NEEDED
+      // If no auth client or not authenticated, use mock analysis
+      if (!this.authClient || !this.authClient.isAuthenticated()) {
+        core.warning('⚠️  No authentication available, using mock analysis');
+        return await this.createMockAnalysisResult(logs, progressInterval);
+      }
+
+      // Prepare request payload for real API
       const requestPayload = {
-        workflowInfo,
+        workflowInfo: {
+          runId: workflowInfo.runId,
+          name: workflowInfo.name,
+          repository: workflowInfo.repository,
+        },
         logs: logs.map(log => ({
           jobName: log.jobName,
           jobId: log.jobId,
           timestamp: log.timestamp,
           // Send S3 URLs instead of full content for better performance
-          s3Url: s3Results.find(result => 
+          s3Url: s3Results.find(result =>
             result.key.includes(log.jobName.replace(/[^a-zA-Z0-9-_]/g, '_'))
           )?.location,
-          // Uncomment below to send content directly (may hit API limits)
-          // content: log.content
+          contentPreview: log.content.substring(0, 1000), // First 1000 chars for preview
         })),
         metadata: {
           repository: workflowInfo.repository,
           timestamp: new Date().toISOString(),
           s3Bucket: s3Results[0]?.bucket,
-        }
+          totalLogs: logs.length,
+          totalSize: logs.reduce((sum, log) => sum + log.content.length, 0),
+        },
+        analysisOptions: {
+          includeCritical: true,
+          includeHigh: true,
+          includeMedium: true,
+          includeLow: true,
+          maxIssues: 100,
+        },
       };
 
+      core.info('📤 Sending analysis request to API...');
+
       const response: AxiosResponse<AnalysisResult> = await axios.post(
-        this.apiEndpoint,
+        `${this.apiEndpoint}/analyze`,
         requestPayload,
         {
           timeout: this.timeout,
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'GitHub-Action-Log-Analyzer/1.0',
-            // Add authentication headers as needed
-            // 'Authorization': `Bearer ${process.env.API_TOKEN}`,
-            // 'X-API-Key': process.env.API_KEY,
-          },
+          headers: this.authClient.getAuthHeaders(),
         }
       );
 
       clearInterval(progressInterval);
-      
+
       if (response.status !== 200) {
         throw new Error(`API returned status ${response.status}: ${response.statusText}`);
       }
 
       const analysisResult = response.data;
-      */
 
-      // MOCK ANALYSIS RESULT - REPLACE WITH ACTUAL API CALL ABOVE
-      const analysisResult: AnalysisResult = await this.createMockAnalysisResult(logs);
-
-      clearInterval(progressInterval);
+      // Validate response structure
+      if (!analysisResult.status || !analysisResult.issues || !analysisResult.summary) {
+        throw new Error('Invalid analysis response structure');
+      }
 
       core.info(`✅ Analysis completed successfully!`);
       core.info(`📋 Found ${analysisResult.issues.length} issues total`);
@@ -108,33 +129,100 @@ export class AnalysisClient {
       return analysisResult;
     } catch (error) {
       clearInterval(progressInterval);
-
-      if (axios.isAxiosError(error)) {
-        if (error.code === 'ECONNABORTED') {
-          core.error(`⏰ Analysis timed out after ${this.timeout / 1000} seconds`);
-          return this.createTimeoutResult();
-        }
-
-        core.error(`🔥 API request failed: ${error.message}`);
-        if (error.response) {
-          core.error(`Response status: ${error.response.status}`);
-          core.error(`Response data: ${JSON.stringify(error.response.data, null, 2)}`);
-        }
-      } else {
-        core.error(`🔥 Analysis failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-
-      throw new Error(`Analysis failed: ${error instanceof Error ? error.message : String(error)}`);
+      return this.handleAnalysisError(error, logs);
     }
   }
 
   /**
-   * Create a mock analysis result for demonstration
-   * Replace this with actual API integration
+   * Handle API errors and fallback to mock analysis
    */
-  private async createMockAnalysisResult(logs: LogContent[]): Promise<AnalysisResult> {
+  private async handleAnalysisError(error: unknown, logs: LogContent[]): Promise<AnalysisResult> {
+    let errorMessage = 'Analysis failed';
+    let shouldFallback = false;
+
+    if (axios.isAxiosError(error)) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      const statusCode = axiosError.response?.status || 0;
+
+      if (axiosError.response?.data) {
+        const errorData = axiosError.response.data;
+        errorMessage = errorData.message || errorData.error || errorMessage;
+      } else if (axiosError.message) {
+        errorMessage = axiosError.message;
+      }
+
+      // Handle specific error scenarios
+      switch (statusCode) {
+        case 401:
+          core.error('🔐 Authentication failed - token may be expired');
+          break;
+        case 403:
+          core.error('🚫 Access forbidden - insufficient permissions');
+          break;
+        case 404:
+          core.error('🔍 Analysis endpoint not found');
+          shouldFallback = true;
+          break;
+        case 429:
+          core.error('⏱️  Rate limit exceeded');
+          break;
+        case 500:
+          core.error('🔥 Server error during analysis');
+          shouldFallback = true;
+          break;
+        default:
+          core.error(`❌ HTTP ${statusCode}: ${errorMessage}`);
+          shouldFallback = true;
+      }
+
+      if (axiosError.code === 'ECONNABORTED') {
+        core.error(`⏰ Analysis timed out after ${this.timeout / 1000} seconds`);
+        return this.createTimeoutResult();
+      }
+    } else if (error instanceof Error) {
+      errorMessage = error.message;
+      core.error(`❌ ${errorMessage}`);
+      shouldFallback = true;
+    } else {
+      core.error(`❌ Unknown error during analysis: ${String(error)}`);
+      shouldFallback = true;
+    }
+
+    // Fallback to mock analysis if appropriate
+    if (shouldFallback) {
+      core.warning('⚠️  Falling back to mock analysis due to API error');
+      return await this.createMockAnalysisResult(logs);
+    }
+
+    // Return failed result
+    return {
+      status: 'failed',
+      issues: [],
+      summary: {
+        totalIssues: 0,
+        criticalIssues: 0,
+        highIssues: 0,
+        mediumIssues: 0,
+        lowIssues: 0,
+      },
+      processingTime: 0,
+      recommendations: [`Analysis failed: ${errorMessage}`],
+    };
+  }
+
+  /**
+   * Create a mock analysis result for demonstration or fallback
+   */
+  private async createMockAnalysisResult(
+    logs: LogContent[],
+    progressInterval?: NodeJS.Timeout
+  ): Promise<AnalysisResult> {
     // Simulate API processing time
     await new Promise(resolve => setTimeout(resolve, 2000));
+
+    if (progressInterval) {
+      clearInterval(progressInterval);
+    }
 
     const issues = logs.flatMap((log, index) => {
       const mockIssues = [];

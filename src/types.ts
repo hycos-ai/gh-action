@@ -11,6 +11,44 @@ export interface ActionInputs {
   workflowRunId?: string;
   analysisApiEndpoint?: string;
   analysisTimeout: number;
+  // Authentication inputs
+  apiUsername?: string;
+  apiPassword?: string;
+}
+
+/**
+ * Authentication request payload
+ */
+export interface AuthLoginRequest {
+  username: string;
+  password: string;
+}
+
+/**
+ * Authentication response from login API
+ */
+export interface AuthLoginResponse {
+  token: string;
+  user: {
+    id: string;
+    username: string;
+    email?: string;
+    name?: string;
+    roles?: string[];
+  };
+  expiresAt?: string;
+  refreshToken?: string;
+}
+
+/**
+ * API Error response structure
+ */
+export interface ApiErrorResponse {
+  error: string;
+  message: string;
+  statusCode: number;
+  timestamp?: string;
+  path?: string;
 }
 
 /**
@@ -108,4 +146,6 @@ export interface ActionOutputs {
   analysisStatus: string;
   issuesFound: number;
   analysisResults: string;
+  authStatus?: string;
+  userInfo?: string;
 }

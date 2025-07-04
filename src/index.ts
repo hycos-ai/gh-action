@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import { AnalysisClient } from './analysis-client';
+import { AuthClient } from './auth-client';
 import { GitHubClient } from './github-client';
 import { S3Uploader } from './s3-uploader';
 import { ActionInputs, ActionOutputs } from './types';
@@ -10,18 +11,40 @@ import { ActionInputs, ActionOutputs } from './types';
 function getActionInputs(): ActionInputs {
   const workflowRunIdInput = core.getInput('workflow-run-id');
   const analysisApiEndpointInput = core.getInput('analysis-api-endpoint');
+  const apiUsernameInput = core.getInput('api-username');
+  const apiPasswordInput = core.getInput('api-password');
 
-  return {
+  const baseInputs = {
     githubToken: core.getInput('github-token', { required: true }),
     awsAccessKeyId: core.getInput('aws-access-key-id', { required: true }),
     awsSecretAccessKey: core.getInput('aws-secret-access-key', { required: true }),
     awsRegion: core.getInput('aws-region', { required: true }),
     s3Bucket: core.getInput('s3-bucket', { required: true }),
     s3KeyPrefix: core.getInput('s3-key-prefix') || 'build-logs',
-    workflowRunId: workflowRunIdInput || undefined,
-    analysisApiEndpoint: analysisApiEndpointInput || undefined,
     analysisTimeout: parseInt(core.getInput('analysis-timeout') || '300', 10),
   };
+
+  const result: ActionInputs = {
+    ...baseInputs,
+  };
+
+  if (workflowRunIdInput) {
+    result.workflowRunId = workflowRunIdInput;
+  }
+
+  if (analysisApiEndpointInput) {
+    result.analysisApiEndpoint = analysisApiEndpointInput;
+  }
+
+  if (apiUsernameInput) {
+    result.apiUsername = apiUsernameInput;
+  }
+
+  if (apiPasswordInput) {
+    result.apiPassword = apiPasswordInput;
+  }
+
+  return result;
 }
 
 /**
@@ -32,6 +55,68 @@ function setActionOutputs(outputs: ActionOutputs): void {
   core.setOutput('analysis-status', outputs.analysisStatus);
   core.setOutput('issues-found', outputs.issuesFound);
   core.setOutput('analysis-results', outputs.analysisResults);
+
+  if (outputs.authStatus) {
+    core.setOutput('auth-status', outputs.authStatus);
+  }
+
+  if (outputs.userInfo) {
+    core.setOutput('user-info', outputs.userInfo);
+  }
+}
+
+/**
+ * Handle authentication if credentials are provided
+ */
+async function handleAuthentication(
+  inputs: ActionInputs
+): Promise<{ authClient: AuthClient | null; authStatus: string; userInfo: string }> {
+  let authClient: AuthClient | null = null;
+  let authStatus = 'not-attempted';
+  let userInfo = '';
+
+  // Check if authentication is needed
+  if (inputs.analysisApiEndpoint && inputs.apiUsername && inputs.apiPassword) {
+    try {
+      core.startGroup('🔐 Authenticating with API');
+
+      authClient = new AuthClient(inputs.analysisApiEndpoint);
+
+      const authResponse = await authClient.login(inputs.apiUsername, inputs.apiPassword);
+
+      authStatus = 'success';
+      userInfo = JSON.stringify({
+        username: authResponse.user.username,
+        name: authResponse.user.name,
+        roles: authResponse.user.roles,
+      });
+
+      core.info(`✅ Authentication successful for user: ${authResponse.user.username}`);
+
+      // Validate token works
+      const isValid = await authClient.validateToken();
+      if (!isValid) {
+        core.warning('⚠️  Token validation failed but continuing...');
+      }
+
+      core.endGroup();
+    } catch (error) {
+      core.error(
+        `Authentication failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+      authStatus = 'failed';
+      authClient = null;
+      core.endGroup();
+
+      // Don't fail the entire action, just continue without authentication
+      core.warning('⚠️  Continuing without authentication - will use mock analysis');
+    }
+  } else if (inputs.analysisApiEndpoint) {
+    core.warning('⚠️  API endpoint provided but no credentials - will use mock analysis');
+    authStatus = 'no-credentials';
+  }
+
+  return { authClient, authStatus, userInfo };
 }
 
 /**
@@ -53,6 +138,9 @@ async function run(): Promise<void> {
     }
 
     core.info('✅ All required inputs validated');
+
+    // Handle authentication
+    const { authClient, authStatus, userInfo } = await handleAuthentication(inputs);
 
     // Initialize clients
     core.info('🔧 Initializing clients...');
@@ -85,6 +173,8 @@ async function run(): Promise<void> {
         analysisStatus: 'failed',
         issuesFound: 0,
         analysisResults: JSON.stringify({ error: 'No logs found' }),
+        authStatus,
+        userInfo,
       });
       return;
     }
@@ -119,10 +209,11 @@ async function run(): Promise<void> {
     let analysisStatus = 'success';
 
     try {
-      // Create analysis client (even if endpoint is not provided for mock analysis)
+      // Create analysis client with authentication
       const analysisClient = new AnalysisClient(
-        inputs.analysisApiEndpoint || 'mock-endpoint',
-        inputs.analysisTimeout
+        inputs.analysisApiEndpoint || 'http://54.89.53.140:8080/api',
+        inputs.analysisTimeout,
+        authClient || undefined
       );
 
       const repository = process.env.GITHUB_REPOSITORY || 'unknown/unknown';
@@ -167,12 +258,15 @@ async function run(): Promise<void> {
       analysisStatus,
       issuesFound: analysisResult.issues.length,
       analysisResults: JSON.stringify(analysisResult, null, 2),
+      authStatus,
+      userInfo,
     };
 
     setActionOutputs(outputs);
 
     // Summary
     core.info('\n🎉 Action completed successfully!');
+    core.info(`🔐 Authentication Status: ${authStatus}`);
     core.info(`📊 Analysis Status: ${analysisStatus}`);
     core.info(`🔍 Issues Found: ${analysisResult.issues.length}`);
     core.info(`☁️  S3 URL: ${consolidatedResult.location}`);
@@ -187,6 +281,11 @@ async function run(): Promise<void> {
     }
 
     core.endGroup();
+
+    // Cleanup authentication
+    if (authClient) {
+      authClient.logout();
+    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     core.setFailed(`Action failed: ${errorMessage}`);
@@ -197,6 +296,8 @@ async function run(): Promise<void> {
       analysisStatus: 'failed',
       issuesFound: 0,
       analysisResults: JSON.stringify({ error: errorMessage }),
+      authStatus: 'failed',
+      userInfo: '',
     });
   }
 }

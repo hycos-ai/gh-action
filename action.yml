@@ -27,7 +27,13 @@ inputs:
     description: 'Specific workflow run ID to analyze (optional, defaults to current run)'
     required: false
   analysis-api-endpoint:
-    description: 'Custom API endpoint for log analysis (currently commented out)'
+    description: 'API endpoint for log analysis (e.g., http://54.89.53.140:8080)'
+    required: false
+  api-username:
+    description: 'Username for API authentication'
+    required: false
+  api-password:
+    description: 'Password for API authentication'
     required: false
   analysis-timeout:
     description: 'Timeout for analysis in seconds'
@@ -43,6 +49,10 @@ outputs:
     description: 'Number of issues found in the analysis'
   analysis-results:
     description: 'JSON string containing analysis results'
+  auth-status:
+    description: 'Authentication status (success, failed, not-attempted, no-credentials)'
+  user-info:
+    description: 'JSON string containing authenticated user information'
 
 runs:
   using: 'node20'
@@ -50,4 +60,4 @@ runs:
 
 branding:
   icon: 'search'
-  color: 'blue' 
+  color: 'blue'
