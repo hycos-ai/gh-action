@@ -1,19 +1,147 @@
 import * as core from '@actions/core';
 import axios, { AxiosError, AxiosResponse } from 'axios';
-import { ApiErrorResponse, AuthLoginRequest, AuthLoginResponse } from './types';
+import {
+  ApiErrorResponse,
+  AuthLoginRequest,
+  AuthLoginResponse,
+  HttpClient,
+  RetryOptions,
+  TokenStorage,
+} from './types';
 
+/**
+ * Simple in-memory token storage implementation
+ */
+class MemoryTokenStorage implements TokenStorage {
+  private token: string | null = null;
+  private expiry: Date | null = null;
+
+  getToken(): string | null {
+    if (!this.token) {
+      return null;
+    }
+
+    // Check if token is expired
+    if (this.expiry && new Date() > this.expiry) {
+      this.clearToken();
+      return null;
+    }
+
+    return this.token;
+  }
+
+  setToken(token: string): void {
+    this.token = token;
+    // Set expiry to 1 hour from now if not specified
+    this.expiry = new Date(Date.now() + 60 * 60 * 1000);
+  }
+
+  clearToken(): void {
+    this.token = null;
+    this.expiry = null;
+  }
+
+  isTokenValid(): boolean {
+    return this.getToken() !== null;
+  }
+}
+
+/**
+ * HTTP client wrapper with retry logic
+ */
+class HttpClientWithRetry implements HttpClient {
+  private retryOptions: RetryOptions;
+
+  constructor(retryOptions: RetryOptions) {
+    this.retryOptions = retryOptions;
+  }
+
+  async get<T>(url: string, config?: any): Promise<T> {
+    return this.executeWithRetry(() => axios.get<T>(url, config));
+  }
+
+  async post<T>(url: string, data?: any, config?: any): Promise<T> {
+    return this.executeWithRetry(() => axios.post<T>(url, data, config));
+  }
+
+  async put<T>(url: string, data?: any, config?: any): Promise<T> {
+    return this.executeWithRetry(() => axios.put<T>(url, data, config));
+  }
+
+  async delete<T>(url: string, config?: any): Promise<T> {
+    return this.executeWithRetry(() => axios.delete<T>(url, config));
+  }
+
+  private async executeWithRetry<T>(operation: () => Promise<AxiosResponse<T>>): Promise<T> {
+    let lastError: any;
+    let delay = this.retryOptions.initialDelay;
+
+    for (let attempt = 1; attempt <= this.retryOptions.maxAttempts; attempt++) {
+      try {
+        const response = await operation();
+        return response.data;
+      } catch (error) {
+        lastError = error;
+
+        if (attempt === this.retryOptions.maxAttempts) {
+          break;
+        }
+
+        // Check if error is retryable
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status || 0;
+          // Don't retry on client errors (4xx) except for 429 (rate limit)
+          if (status >= 400 && status < 500 && status !== 429) {
+            break;
+          }
+        }
+
+        core.warning(`Attempt ${attempt} failed, retrying in ${delay}ms...`);
+        await this.sleep(delay);
+        delay = Math.min(delay * this.retryOptions.backoffFactor, this.retryOptions.maxDelay);
+      }
+    }
+
+    throw lastError;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+
+/**
+ * Authentication client following SOLID principles
+ */
 export class AuthClient {
   private baseUrl: string;
-  private token: string | null = null;
-  private userInfo: AuthLoginResponse['user'] | null = null;
-  private tokenExpiry: Date | null = null;
+  private tokenStorage: TokenStorage;
+  private httpClient: HttpClient;
+  private userInfo: { username: string; roles: string[] } | null = null;
 
-  constructor(baseUrl: string) {
+  constructor(
+    baseUrl: string,
+    tokenStorage?: TokenStorage,
+    httpClient?: HttpClient,
+    retryOptions?: RetryOptions
+  ) {
     // Ensure baseUrl ends with /api if not already included
     this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
     if (!this.baseUrl.includes('/api')) {
       this.baseUrl += '/api';
     }
+
+    this.tokenStorage = tokenStorage || new MemoryTokenStorage();
+    this.httpClient =
+      httpClient ||
+      new HttpClientWithRetry(
+        retryOptions || {
+          maxAttempts: 3,
+          initialDelay: 1000,
+          maxDelay: 5000,
+          backoffFactor: 2,
+        }
+      );
   }
 
   /**
@@ -28,47 +156,36 @@ export class AuthClient {
         password,
       };
 
-      const response: AxiosResponse<AuthLoginResponse> = await axios.post(
+      const response = await this.httpClient.post<AuthLoginResponse>(
         `${this.baseUrl}/auth/login`,
         loginRequest,
         {
           headers: {
             'Content-Type': 'application/json',
-            'User-Agent': 'GitHub-Action-Log-Analyzer/1.0',
+            'User-Agent': 'GitHub-Action-Secure-Log-Uploader/1.0',
           },
           timeout: 30000, // 30 second timeout for auth
         }
       );
 
-      if (response.status !== 200) {
-        throw new Error(`Authentication failed with status ${response.status}`);
-      }
-
-      const authResponse = response.data;
-
       // Validate response structure
-      if (!authResponse.token || !authResponse.user) {
-        throw new Error('Invalid authentication response: missing token or user data');
+      if (!response.token || !response.username) {
+        throw new Error('Invalid authentication response: missing token or username');
       }
 
       // Store authentication data
-      this.token = authResponse.token;
-      this.userInfo = authResponse.user;
+      this.tokenStorage.setToken(response.token);
+      this.userInfo = {
+        username: response.username,
+        roles: response.roles || [],
+      };
 
-      // Parse token expiry if provided
-      if (authResponse.expiresAt) {
-        this.tokenExpiry = new Date(authResponse.expiresAt);
+      core.info(`✅ Successfully authenticated as: ${response.username}`);
+      if (response.roles && response.roles.length > 0) {
+        core.info(`🏷️  Roles: ${response.roles.join(', ')}`);
       }
 
-      core.info(`✅ Successfully authenticated as: ${authResponse.user.username}`);
-      if (authResponse.user.name) {
-        core.info(`👤 User: ${authResponse.user.name}`);
-      }
-      if (authResponse.user.roles && authResponse.user.roles.length > 0) {
-        core.info(`🏷️  Roles: ${authResponse.user.roles.join(', ')}`);
-      }
-
-      return authResponse;
+      return response;
     } catch (error) {
       return this.handleAuthError(error, 'login');
     }
@@ -78,26 +195,13 @@ export class AuthClient {
    * Get the current authentication token
    */
   getToken(): string | null {
-    if (!this.token) {
-      return null;
-    }
-
-    // Check if token is expired
-    if (this.tokenExpiry && new Date() > this.tokenExpiry) {
-      core.warning('⚠️  Authentication token has expired');
-      this.token = null;
-      this.userInfo = null;
-      this.tokenExpiry = null;
-      return null;
-    }
-
-    return this.token;
+    return this.tokenStorage.getToken();
   }
 
   /**
    * Get current user information
    */
-  getUserInfo(): AuthLoginResponse['user'] | null {
+  getUserInfo(): { username: string; roles: string[] } | null {
     return this.userInfo;
   }
 
@@ -105,7 +209,7 @@ export class AuthClient {
    * Check if currently authenticated
    */
   isAuthenticated(): boolean {
-    return this.getToken() !== null;
+    return this.tokenStorage.isTokenValid();
   }
 
   /**
@@ -120,7 +224,7 @@ export class AuthClient {
     return {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
-      'User-Agent': 'GitHub-Action-Log-Analyzer/1.0',
+      'User-Agent': 'GitHub-Action-Secure-Log-Uploader/1.0',
     };
   }
 
@@ -128,9 +232,8 @@ export class AuthClient {
    * Clear authentication data (logout)
    */
   logout(): void {
-    this.token = null;
+    this.tokenStorage.clearToken();
     this.userInfo = null;
-    this.tokenExpiry = null;
     core.info('🔓 Logged out successfully');
   }
 
@@ -143,14 +246,19 @@ export class AuthClient {
         return false;
       }
 
-      // Make a simple request to validate token
-      const response = await axios.get(`${this.baseUrl}/auth/validate`, {
+      // Make a simple request to validate token - using the cloud credentials endpoint
+      // as it's the next step in the flow and will validate the token
+      await this.httpClient.get(`${this.baseUrl}/upload/cloud/credentials`, {
         headers: this.getAuthHeaders(),
         timeout: 10000,
       });
 
-      return response.status === 200;
+      return true;
     } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        // Token is invalid, clear it
+        this.logout();
+      }
       core.warning('⚠️  Token validation failed');
       return false;
     }
@@ -201,12 +309,6 @@ export class AuthClient {
       core.error(`❌ Unknown error during ${operation}: ${String(error)}`);
     }
 
-    // Log additional debugging information
-    core.debug(`API Base URL: ${this.baseUrl}`);
-    core.debug(`Operation: ${operation}`);
-    core.debug(`Status Code: ${statusCode}`);
-    core.debug(`Error Details: ${JSON.stringify(error, null, 2)}`);
-
-    throw new Error(`Authentication ${operation} failed: ${errorMessage}`);
+    throw new Error(errorMessage);
   }
 }

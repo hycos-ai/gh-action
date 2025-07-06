@@ -2,18 +2,13 @@
  * Configuration interface for the action inputs
  */
 export interface ActionInputs {
+  username: string;
+  password: string;
+  apiEndpoint: string;
   githubToken: string;
-  awsAccessKeyId: string;
-  awsSecretAccessKey: string;
-  awsRegion: string;
-  s3Bucket: string;
-  s3KeyPrefix: string;
   workflowRunId?: string;
-  analysisApiEndpoint?: string;
-  analysisTimeout: number;
-  // Authentication inputs
-  apiUsername?: string;
-  apiPassword?: string;
+  retryAttempts: number;
+  retryDelay: number;
 }
 
 /**
@@ -29,15 +24,54 @@ export interface AuthLoginRequest {
  */
 export interface AuthLoginResponse {
   token: string;
-  user: {
-    id: string;
-    username: string;
-    email?: string;
-    name?: string;
-    roles?: string[];
-  };
-  expiresAt?: string;
-  refreshToken?: string;
+  type: string;
+  username: string;
+  roles: string[];
+}
+
+/**
+ * Cloud credentials response from API
+ */
+export interface CloudCredentialsResponse {
+  secretAccessKey: string;
+  accessKeyId: string;
+  sessionToken: string;
+  expiration: string;
+  bucket: string;
+}
+
+/**
+ * File upload information for notification
+ */
+export interface UploadedFile {
+  filename: string;
+  fileType: 'LOG';
+  bucketName: string;
+}
+
+/**
+ * Build details for notification
+ */
+export interface BuildDetails {
+  folder: string;
+  jobName: string;
+  buildNumber: number;
+}
+
+/**
+ * Server details for notification
+ */
+export interface ServerDetails {
+  serverAddress: string;
+}
+
+/**
+ * Upload notification request payload
+ */
+export interface UploadNotificationRequest {
+  files: UploadedFile[];
+  buildDetails: BuildDetails;
+  serverDetails: ServerDetails;
 }
 
 /**
@@ -62,6 +96,10 @@ export interface WorkflowRun {
   created_at: string;
   updated_at: string;
   html_url: string;
+  repository: {
+    full_name: string;
+    html_url: string;
+  };
 }
 
 /**
@@ -143,9 +181,55 @@ export interface AnalysisResult {
  */
 export interface ActionOutputs {
   s3Url: string;
-  analysisStatus: string;
-  issuesFound: number;
-  analysisResults: string;
-  authStatus?: string;
-  userInfo?: string;
+  uploadStatus: string;
+  filesUploaded: number;
+  authStatus: string;
+  userInfo: string;
+  notificationStatus: string;
+}
+
+/**
+ * Retry configuration options
+ */
+export interface RetryOptions {
+  maxAttempts: number;
+  initialDelay: number;
+  maxDelay: number;
+  backoffFactor: number;
+}
+
+/**
+ * HTTP client interface for dependency injection
+ */
+export interface HttpClient {
+  get<T>(url: string, config?: any): Promise<T>;
+  post<T>(url: string, data?: any, config?: any): Promise<T>;
+  put<T>(url: string, data?: any, config?: any): Promise<T>;
+  delete<T>(url: string, config?: any): Promise<T>;
+}
+
+/**
+ * S3 client interface for dependency injection
+ */
+export interface S3Client {
+  upload(params: any): Promise<S3UploadResult>;
+}
+
+/**
+ * Token storage interface
+ */
+export interface TokenStorage {
+  getToken(): string | null;
+  setToken(token: string): void;
+  clearToken(): void;
+  isTokenValid(): boolean;
+}
+
+/**
+ * Generic API response wrapper
+ */
+export interface ApiResponse<T> {
+  data: T;
+  status: number;
+  message?: string;
 }

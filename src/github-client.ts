@@ -51,6 +51,10 @@ export class GitHubClient {
         created_at: run.created_at,
         updated_at: run.updated_at,
         html_url: run.html_url,
+        repository: {
+          full_name: `${this.owner}/${this.repo}`,
+          html_url: `https://github.com/${this.owner}/${this.repo}`,
+        },
       };
     } catch (error) {
       core.error(`Failed to fetch workflow run: ${error}`);

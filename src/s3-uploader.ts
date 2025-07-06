@@ -1,30 +1,58 @@
 import * as core from '@actions/core';
 import { S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
-import { LogContent, S3UploadResult } from './types';
+import { CredentialsClient } from './credentials-client';
+import { CloudCredentialsResponse, LogContent, RetryOptions, S3UploadResult } from './types';
 
+/**
+ * S3 Uploader with temporary credentials and retry logic
+ * Follows SOLID principles with dependency injection
+ */
 export class S3Uploader {
-  private s3Client: S3Client;
-  private bucket: string;
-  private keyPrefix: string;
+  private s3Client: S3Client | null = null;
+  private credentials: CloudCredentialsResponse | null = null;
+  private credentialsClient: CredentialsClient;
+  private retryOptions: RetryOptions;
 
-  constructor(
-    accessKeyId: string,
-    secretAccessKey: string,
-    region: string,
-    bucket: string,
-    keyPrefix: string = 'build-logs'
-  ) {
-    this.s3Client = new S3Client({
-      region,
-      credentials: {
-        accessKeyId,
-        secretAccessKey,
-      },
-    });
+  constructor(credentialsClient: CredentialsClient, retryOptions?: RetryOptions) {
+    this.credentialsClient = credentialsClient;
+    this.retryOptions = retryOptions || {
+      maxAttempts: 3,
+      initialDelay: 1000,
+      maxDelay: 10000,
+      backoffFactor: 2,
+    };
+  }
 
-    this.bucket = bucket;
-    this.keyPrefix = keyPrefix;
+  /**
+   * Initialize or refresh S3 client with current credentials
+   */
+  private async initializeS3Client(): Promise<void> {
+    try {
+      // Get fresh credentials if needed
+      this.credentials = await this.credentialsClient.refreshCredentialsIfNeeded(
+        this.credentials || undefined
+      );
+
+      // Create S3 client with temporary credentials
+      this.s3Client = new S3Client({
+        region: 'us-east-1', // Default region, can be overridden
+        credentials: {
+          accessKeyId: this.credentials.accessKeyId,
+          secretAccessKey: this.credentials.secretAccessKey,
+          sessionToken: this.credentials.sessionToken,
+        },
+        maxAttempts: this.retryOptions.maxAttempts,
+        retryMode: 'adaptive',
+      });
+
+      core.info('✅ S3 client initialized with temporary credentials');
+    } catch (error) {
+      core.error(`Failed to initialize S3 client: ${error}`);
+      throw new Error(
+        `S3 client initialization failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   /**
@@ -35,7 +63,65 @@ export class S3Uploader {
     const sanitizedJobName = jobName.replace(/[^a-zA-Z0-9-_]/g, '_');
     const timestampSuffix = new Date(timestamp).getTime();
 
-    return `${this.keyPrefix}/${date}/${workflowRunId}/${sanitizedJobName}_${timestampSuffix}.log`;
+    return `build-logs/${date}/${workflowRunId}/${sanitizedJobName}_${timestampSuffix}.log`;
+  }
+
+  /**
+   * Execute operation with retry logic
+   */
+  private async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    operationName: string
+  ): Promise<T> {
+    let lastError: any;
+    let delay = this.retryOptions.initialDelay;
+
+    for (let attempt = 1; attempt <= this.retryOptions.maxAttempts; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+
+        if (attempt === this.retryOptions.maxAttempts) {
+          break;
+        }
+
+        // Check if credentials need refreshing
+        if (this.isCredentialsError(error)) {
+          core.warning(`Credentials may be expired, refreshing... (attempt ${attempt})`);
+          await this.initializeS3Client();
+        }
+
+        core.warning(
+          `${operationName} failed (attempt ${attempt}/${this.retryOptions.maxAttempts}), retrying in ${delay}ms...`
+        );
+        await this.sleep(delay);
+        delay = Math.min(delay * this.retryOptions.backoffFactor, this.retryOptions.maxDelay);
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
+   * Check if error is related to credentials
+   */
+  private isCredentialsError(error: any): boolean {
+    const errorMessage = error?.message || error?.toString() || '';
+    return (
+      errorMessage.includes('InvalidAccessKeyId') ||
+      errorMessage.includes('SignatureDoesNotMatch') ||
+      errorMessage.includes('TokenRefreshRequired') ||
+      errorMessage.includes('ExpiredToken') ||
+      errorMessage.includes('Forbidden')
+    );
+  }
+
+  /**
+   * Sleep for specified milliseconds
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
@@ -46,7 +132,16 @@ export class S3Uploader {
     workflowRunId: number,
     workflowName: string
   ): Promise<S3UploadResult> {
-    try {
+    return this.executeWithRetry(async () => {
+      // Ensure S3 client is initialized with valid credentials
+      if (!this.s3Client || !this.credentials) {
+        await this.initializeS3Client();
+      }
+
+      if (!this.s3Client || !this.credentials) {
+        throw new Error('Failed to initialize S3 client');
+      }
+
       const s3Key = this.generateS3Key(workflowRunId, logContent.jobName, logContent.timestamp);
       core.info(`Uploading log for job "${logContent.jobName}" to S3: ${s3Key}`);
 
@@ -63,7 +158,7 @@ export class S3Uploader {
       const upload = new Upload({
         client: this.s3Client,
         params: {
-          Bucket: this.bucket,
+          Bucket: this.credentials.bucket,
           Key: s3Key,
           Body: logContent.content,
           ContentType: 'text/plain',
@@ -87,24 +182,19 @@ export class S3Uploader {
       const result = await upload.done();
 
       const s3Result: S3UploadResult = {
-        location: result.Location || `https://${this.bucket}.s3.amazonaws.com/${s3Key}`,
-        bucket: this.bucket,
+        location: result.Location || `https://${this.credentials.bucket}.s3.amazonaws.com/${s3Key}`,
+        bucket: this.credentials.bucket,
         key: s3Key,
         etag: result.ETag || '',
       };
 
       core.info(`✅ Successfully uploaded log for job "${logContent.jobName}"`);
       return s3Result;
-    } catch (error) {
-      core.error(`Failed to upload log for job "${logContent.jobName}": ${error}`);
-      throw new Error(
-        `S3 upload failed: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
+    }, `Upload log for job "${logContent.jobName}"`);
   }
 
   /**
-   * Upload all logs to S3
+   * Upload all logs to S3 with controlled concurrency
    */
   async uploadAllLogs(
     logs: LogContent[],
@@ -119,29 +209,31 @@ export class S3Uploader {
     core.info(`Starting upload of ${logs.length} log files to S3`);
 
     try {
-      // Upload logs in parallel with controlled concurrency
-      const uploadPromises = logs.map(log => this.uploadLogFile(log, workflowRunId, workflowName));
+      // Upload logs in parallel with controlled concurrency (max 3 at a time)
+      const concurrencyLimit = 3;
+      const results: S3UploadResult[] = [];
+      const errors: string[] = [];
 
-      const results = await Promise.allSettled(uploadPromises);
+      for (let i = 0; i < logs.length; i += concurrencyLimit) {
+        const batch = logs.slice(i, i + concurrencyLimit);
+        const batchPromises = batch.map(log =>
+          this.uploadLogFile(log, workflowRunId, workflowName).catch(error => {
+            errors.push(`${log.jobName}: ${error.message}`);
+            return null;
+          })
+        );
 
-      const successful: S3UploadResult[] = [];
-      const failed: string[] = [];
-
-      results.forEach((result, index) => {
-        if (result.status === 'fulfilled') {
-          successful.push(result.value);
-        } else {
-          failed.push(`${logs[index]?.jobName}: ${result.reason}`);
-        }
-      });
-
-      if (failed.length > 0) {
-        core.warning(`Failed to upload ${failed.length} log files:`);
-        failed.forEach(failure => core.warning(`  - ${failure}`));
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...(batchResults.filter(result => result !== null) as S3UploadResult[]));
       }
 
-      core.info(`✅ Successfully uploaded ${successful.length}/${logs.length} log files to S3`);
-      return successful;
+      if (errors.length > 0) {
+        core.warning(`Failed to upload ${errors.length} log files:`);
+        errors.forEach(error => core.warning(`  - ${error}`));
+      }
+
+      core.info(`✅ Successfully uploaded ${results.length}/${logs.length} log files to S3`);
+      return results;
     } catch (error) {
       core.error(`Batch upload failed: ${error}`);
       throw new Error(
@@ -190,5 +282,15 @@ export class S3Uploader {
         `Consolidated log creation failed: ${error instanceof Error ? error.message : String(error)}`
       );
     }
+  }
+
+  /**
+   * Get current bucket name
+   */
+  getBucket(): string {
+    if (!this.credentials) {
+      throw new Error('No credentials available - please initialize S3 client first');
+    }
+    return this.credentials.bucket;
   }
 }

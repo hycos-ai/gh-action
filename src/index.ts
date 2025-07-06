@@ -1,50 +1,25 @@
 import * as core from '@actions/core';
-import { AnalysisClient } from './analysis-client';
+import axios from 'axios';
 import { AuthClient } from './auth-client';
+import { CredentialsClient } from './credentials-client';
 import { GitHubClient } from './github-client';
+import { NotificationClient } from './notification-client';
 import { S3Uploader } from './s3-uploader';
-import { ActionInputs, ActionOutputs } from './types';
+import { ActionInputs, ActionOutputs, RetryOptions } from './types';
 
 /**
  * Parse action inputs from environment variables
  */
 function getActionInputs(): ActionInputs {
-  const workflowRunIdInput = core.getInput('workflow-run-id');
-  const analysisApiEndpointInput = core.getInput('analysis-api-endpoint');
-  const apiUsernameInput = core.getInput('api-username');
-  const apiPasswordInput = core.getInput('api-password');
-
-  const baseInputs = {
+  return {
+    username: core.getInput('username', { required: true }),
+    password: core.getInput('password', { required: true }),
+    apiEndpoint: core.getInput('api-endpoint', { required: true }),
     githubToken: core.getInput('github-token', { required: true }),
-    awsAccessKeyId: core.getInput('aws-access-key-id', { required: true }),
-    awsSecretAccessKey: core.getInput('aws-secret-access-key', { required: true }),
-    awsRegion: core.getInput('aws-region', { required: true }),
-    s3Bucket: core.getInput('s3-bucket', { required: true }),
-    s3KeyPrefix: core.getInput('s3-key-prefix') || 'build-logs',
-    analysisTimeout: parseInt(core.getInput('analysis-timeout') || '300', 10),
+    workflowRunId: core.getInput('workflow-run-id') || undefined,
+    retryAttempts: parseInt(core.getInput('retry-attempts') || '3', 10),
+    retryDelay: parseInt(core.getInput('retry-delay') || '2', 10),
   };
-
-  const result: ActionInputs = {
-    ...baseInputs,
-  };
-
-  if (workflowRunIdInput) {
-    result.workflowRunId = workflowRunIdInput;
-  }
-
-  if (analysisApiEndpointInput) {
-    result.analysisApiEndpoint = analysisApiEndpointInput;
-  }
-
-  if (apiUsernameInput) {
-    result.apiUsername = apiUsernameInput;
-  }
-
-  if (apiPasswordInput) {
-    result.apiPassword = apiPasswordInput;
-  }
-
-  return result;
 }
 
 /**
@@ -52,109 +27,82 @@ function getActionInputs(): ActionInputs {
  */
 function setActionOutputs(outputs: ActionOutputs): void {
   core.setOutput('s3-url', outputs.s3Url);
-  core.setOutput('analysis-status', outputs.analysisStatus);
-  core.setOutput('issues-found', outputs.issuesFound);
-  core.setOutput('analysis-results', outputs.analysisResults);
-
-  if (outputs.authStatus) {
-    core.setOutput('auth-status', outputs.authStatus);
-  }
-
-  if (outputs.userInfo) {
-    core.setOutput('user-info', outputs.userInfo);
-  }
+  core.setOutput('upload-status', outputs.uploadStatus);
+  core.setOutput('files-uploaded', outputs.filesUploaded.toString());
+  core.setOutput('auth-status', outputs.authStatus);
+  core.setOutput('user-info', outputs.userInfo);
+  core.setOutput('notification-status', outputs.notificationStatus);
 }
 
 /**
- * Handle authentication if credentials are provided
- */
-async function handleAuthentication(
-  inputs: ActionInputs
-): Promise<{ authClient: AuthClient | null; authStatus: string; userInfo: string }> {
-  let authClient: AuthClient | null = null;
-  let authStatus = 'not-attempted';
-  let userInfo = '';
-
-  // Check if authentication is needed
-  if (inputs.analysisApiEndpoint && inputs.apiUsername && inputs.apiPassword) {
-    try {
-      core.startGroup('🔐 Authenticating with API');
-
-      authClient = new AuthClient(inputs.analysisApiEndpoint);
-
-      const authResponse = await authClient.login(inputs.apiUsername, inputs.apiPassword);
-
-      authStatus = 'success';
-      userInfo = JSON.stringify({
-        username: authResponse.user.username,
-        name: authResponse.user.name,
-        roles: authResponse.user.roles,
-      });
-
-      core.info(`✅ Authentication successful for user: ${authResponse.user.username}`);
-
-      // Validate token works
-      const isValid = await authClient.validateToken();
-      if (!isValid) {
-        core.warning('⚠️  Token validation failed but continuing...');
-      }
-
-      core.endGroup();
-    } catch (error) {
-      core.error(
-        `Authentication failed: ${error instanceof Error ? error.message : String(error)}`
-      );
-      authStatus = 'failed';
-      authClient = null;
-      core.endGroup();
-
-      // Don't fail the entire action, just continue without authentication
-      core.warning('⚠️  Continuing without authentication - will use mock analysis');
-    }
-  } else if (inputs.analysisApiEndpoint) {
-    core.warning('⚠️  API endpoint provided but no credentials - will use mock analysis');
-    authStatus = 'no-credentials';
-  }
-
-  return { authClient, authStatus, userInfo };
-}
-
-/**
- * Main action execution
+ * Main action execution following the specified flow
  */
 async function run(): Promise<void> {
+  let authStatus = 'failed';
+  let userInfo = '';
+  let uploadStatus = 'failed';
+  let filesUploaded = 0;
+  let notificationStatus = 'failed';
+  let s3Url = '';
+
   try {
-    core.info('🚀 Starting Build Log Analyzer Action');
+    core.info('🚀 Starting Secure Build Log Uploader Action');
 
-    // Parse inputs
+    // Step 1: Parse and validate inputs
     const inputs = getActionInputs();
+    core.info('✅ Action inputs validated');
 
-    // Validate required inputs
-    if (!inputs.githubToken) {
-      throw new Error('GitHub token is required');
-    }
-    if (!inputs.s3Bucket) {
-      throw new Error('S3 bucket name is required');
-    }
+    // Step 2: Setup retry options
+    const retryOptions: RetryOptions = {
+      maxAttempts: inputs.retryAttempts,
+      initialDelay: inputs.retryDelay * 1000, // Convert to milliseconds
+      maxDelay: 30000, // 30 seconds max delay
+      backoffFactor: 2,
+    };
 
-    core.info('✅ All required inputs validated');
+    // Step 3: Initialize HTTP client wrapper
+    const httpClient = {
+      get: async <T>(url: string, config?: any): Promise<T> => {
+        const response = await axios.get<T>(url, config);
+        return response.data;
+      },
+      post: async <T>(url: string, data?: any, config?: any): Promise<T> => {
+        const response = await axios.post<T>(url, data, config);
+        return response.data;
+      },
+      put: async <T>(url: string, data?: any, config?: any): Promise<T> => {
+        const response = await axios.put<T>(url, data, config);
+        return response.data;
+      },
+      delete: async <T>(url: string, config?: any): Promise<T> => {
+        const response = await axios.delete<T>(url, config);
+        return response.data;
+      },
+    };
 
-    // Handle authentication
-    const { authClient, authStatus, userInfo } = await handleAuthentication(inputs);
+    // Step 4: Authenticate with the API
+    core.startGroup('🔐 Authenticating with API');
+    const authClient = new AuthClient(inputs.apiEndpoint, undefined, httpClient, retryOptions);
 
-    // Initialize clients
-    core.info('🔧 Initializing clients...');
+    const authResponse = await authClient.login(inputs.username, inputs.password);
+    authStatus = 'success';
+    userInfo = JSON.stringify({
+      username: authResponse.username,
+      roles: authResponse.roles,
+      type: authResponse.type,
+    });
+
+    core.info(`✅ Successfully authenticated as: ${authResponse.username}`);
+    core.endGroup();
+
+    // Step 5: Initialize GitHub client
+    core.startGroup('🐙 Initializing GitHub client');
     const githubClient = new GitHubClient(inputs.githubToken);
-    const s3Uploader = new S3Uploader(
-      inputs.awsAccessKeyId,
-      inputs.awsSecretAccessKey,
-      inputs.awsRegion,
-      inputs.s3Bucket,
-      inputs.s3KeyPrefix
-    );
+    core.info('✅ GitHub client initialized');
+    core.endGroup();
 
-    // Step 1: Get workflow information
-    core.startGroup('📋 Fetching Workflow Information');
+    // Step 6: Get workflow information
+    core.startGroup('📋 Fetching workflow information');
     const workflowRun = await githubClient.getWorkflowRun(inputs.workflowRunId);
     core.info(`Workflow: ${workflowRun.name}`);
     core.info(`Run ID: ${workflowRun.id}`);
@@ -162,19 +110,19 @@ async function run(): Promise<void> {
     core.info(`Conclusion: ${workflowRun.conclusion || 'N/A'}`);
     core.endGroup();
 
-    // Step 2: Download logs
-    core.startGroup('📥 Downloading Build Logs');
+    // Step 7: Download GitHub logs
+    core.startGroup('📥 Downloading build logs');
     const logs = await githubClient.getAllWorkflowLogs(workflowRun.id);
 
     if (logs.length === 0) {
       core.warning('No logs found for this workflow run');
       setActionOutputs({
         s3Url: '',
-        analysisStatus: 'failed',
-        issuesFound: 0,
-        analysisResults: JSON.stringify({ error: 'No logs found' }),
+        uploadStatus: 'failed',
+        filesUploaded: 0,
         authStatus,
         userInfo,
+        notificationStatus: 'not-attempted',
       });
       return;
     }
@@ -184,11 +132,18 @@ async function run(): Promise<void> {
     core.info(`📊 Total log size: ${(totalLogSize / 1024 / 1024).toFixed(2)} MB`);
     core.endGroup();
 
-    // Step 3: Upload logs to S3
-    core.startGroup('☁️ Uploading Logs to S3');
-    const s3Results = await s3Uploader.uploadAllLogs(logs, workflowRun.id, workflowRun.name);
+    // Step 8: Initialize credentials client and S3 uploader
+    core.startGroup('☁️ Setting up S3 upload');
+    const credentialsClient = new CredentialsClient(inputs.apiEndpoint, authClient, httpClient);
+    const s3Uploader = new S3Uploader(credentialsClient, retryOptions);
+    core.info('✅ S3 uploader initialized');
+    core.endGroup();
 
-    if (s3Results.length === 0) {
+    // Step 9: Upload logs to S3
+    core.startGroup('📤 Uploading logs to S3');
+    const uploadResults = await s3Uploader.uploadAllLogs(logs, workflowRun.id, workflowRun.name);
+
+    if (uploadResults.length === 0) {
       throw new Error('Failed to upload any logs to S3');
     }
 
@@ -198,130 +153,95 @@ async function run(): Promise<void> {
       workflowRun.id,
       workflowRun.name
     );
+    uploadResults.push(consolidatedResult);
 
-    core.info(`✅ Uploaded ${s3Results.length} individual log files`);
-    core.info(`✅ Created consolidated log file: ${consolidatedResult.location}`);
+    uploadStatus = 'success';
+    filesUploaded = uploadResults.length;
+    s3Url = uploadResults[0]?.location || '';
+
+    core.info(`✅ Successfully uploaded ${uploadResults.length} files to S3`);
+    core.info(`📍 Primary S3 URL: ${s3Url}`);
     core.endGroup();
 
-    // Step 4: Analyze logs
-    core.startGroup('🔍 Analyzing Logs');
-    let analysisResult;
-    let analysisStatus = 'success';
+    // Step 10: Notify API about successful upload
+    core.startGroup('📢 Notifying API about upload completion');
+    const notificationClient = new NotificationClient(inputs.apiEndpoint, authClient, httpClient);
 
-    try {
-      // Create analysis client with authentication
-      const analysisClient = new AnalysisClient(
-        inputs.analysisApiEndpoint || 'http://54.89.53.140:8080/api',
-        inputs.analysisTimeout,
-        authClient || undefined
-      );
+    await notificationClient.notifyUploadComplete(
+      uploadResults,
+      workflowRun,
+      s3Uploader.getBucket()
+    );
 
-      const repository = process.env.GITHUB_REPOSITORY || 'unknown/unknown';
-
-      analysisResult = await analysisClient.analyzeLogsWithAPI(
-        logs,
-        {
-          runId: workflowRun.id,
-          name: workflowRun.name,
-          repository,
-        },
-        s3Results
-      );
-
-      // Display results
-      analysisClient.displayResults(analysisResult);
-
-      analysisStatus = analysisResult.status;
-    } catch (error) {
-      core.error(`Analysis failed: ${error}`);
-      analysisStatus = 'failed';
-      analysisResult = {
-        status: 'failed' as const,
-        issues: [],
-        summary: {
-          totalIssues: 0,
-          criticalIssues: 0,
-          highIssues: 0,
-          mediumIssues: 0,
-          lowIssues: 0,
-        },
-        processingTime: 0,
-        recommendations: ['Analysis failed. Check action logs for details.'],
-      };
-    }
+    notificationStatus = 'success';
+    core.info('✅ Successfully notified API about upload completion');
     core.endGroup();
 
-    // Step 5: Set outputs
-    core.startGroup('📤 Setting Outputs');
-    const outputs: ActionOutputs = {
-      s3Url: consolidatedResult.location,
-      analysisStatus,
-      issuesFound: analysisResult.issues.length,
-      analysisResults: JSON.stringify(analysisResult, null, 2),
+    // Step 11: Set success outputs
+    setActionOutputs({
+      s3Url,
+      uploadStatus,
+      filesUploaded,
       authStatus,
       userInfo,
-    };
+      notificationStatus,
+    });
 
-    setActionOutputs(outputs);
-
-    // Summary
-    core.info('\n🎉 Action completed successfully!');
-    core.info(`🔐 Authentication Status: ${authStatus}`);
-    core.info(`📊 Analysis Status: ${analysisStatus}`);
-    core.info(`🔍 Issues Found: ${analysisResult.issues.length}`);
-    core.info(`☁️  S3 URL: ${consolidatedResult.location}`);
-
-    if (analysisResult.issues.length > 0) {
-      const criticalCount = analysisResult.summary.criticalIssues;
-      const highCount = analysisResult.summary.highIssues;
-
-      if (criticalCount > 0 || highCount > 0) {
-        core.warning(`⚠️  Found ${criticalCount} critical and ${highCount} high severity issues`);
-      }
-    }
-
-    core.endGroup();
-
-    // Cleanup authentication
-    if (authClient) {
-      authClient.logout();
-    }
+    core.info('🎉 Secure Build Log Uploader completed successfully!');
+    core.info(`📊 Summary: ${filesUploaded} files uploaded and API notified`);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     core.setFailed(`Action failed: ${errorMessage}`);
 
     // Set failure outputs
     setActionOutputs({
-      s3Url: '',
-      analysisStatus: 'failed',
-      issuesFound: 0,
-      analysisResults: JSON.stringify({ error: errorMessage }),
-      authStatus: 'failed',
-      userInfo: '',
+      s3Url,
+      uploadStatus,
+      filesUploaded,
+      authStatus,
+      userInfo,
+      notificationStatus,
     });
+
+    // Log error details for debugging
+    core.error(`❌ Action failed with error: ${errorMessage}`);
+    if (error instanceof Error && error.stack) {
+      core.debug(`Error stack: ${error.stack}`);
+    }
+
+    // Provide helpful troubleshooting information
+    core.startGroup('🔍 Troubleshooting Information');
+    core.info('Please check the following:');
+    core.info('• API endpoint is correct and accessible');
+    core.info('• Username and password are valid');
+    core.info('• GitHub token has necessary permissions');
+    core.info('• Network connectivity is stable');
+    core.info('• API service is operational');
+    core.endGroup();
+
+    throw error;
   }
 }
 
-/**
- * Handle unhandled promise rejections
- */
+// Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
   core.error(`Unhandled promise rejection at: ${promise}, reason: ${reason}`);
   process.exit(1);
 });
 
-/**
- * Handle uncaught exceptions
- */
+// Handle uncaught exceptions
 process.on('uncaughtException', error => {
   core.error(`Uncaught exception: ${error.message}`);
-  core.error(error.stack || '');
+  if (error.stack) {
+    core.debug(`Exception stack: ${error.stack}`);
+  }
   process.exit(1);
 });
 
 // Run the action
 if (require.main === module) {
-  run();
+  run().catch(error => {
+    core.setFailed(`Action execution failed: ${error.message}`);
+    process.exit(1);
+  });
 }
-
-export { run };

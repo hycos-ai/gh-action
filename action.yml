@@ -1,63 +1,51 @@
-name: 'Build Log Analyzer'
-description: 'Uploads GitHub build logs to AWS S3 and analyzes them for issues'
-author: 'Your Name'
+name: 'Secure Build Log Uploader'
+description: 'Authenticates with API, uploads GitHub build logs to S3 using temporary credentials, and notifies backend'
+author: 'GitHub Actions Plugin'
 
 inputs:
+  username:
+    description: 'Username for API authentication'
+    required: true
+  password:
+    description: 'Password for API authentication'
+    required: true
+  api-endpoint:
+    description: 'Base URL for the API endpoints (e.g., https://api.example.com)'
+    required: true
   github-token:
     description: 'GitHub token for accessing workflow runs and logs'
     required: true
-  aws-access-key-id:
-    description: 'AWS Access Key ID for S3 upload'
-    required: true
-  aws-secret-access-key:
-    description: 'AWS Secret Access Key for S3 upload'
-    required: true
-  aws-region:
-    description: 'AWS region for S3 bucket'
-    required: true
-    default: 'us-east-1'
-  s3-bucket:
-    description: 'S3 bucket name for log storage'
-    required: true
-  s3-key-prefix:
-    description: 'S3 key prefix for organizing logs'
-    required: false
-    default: 'build-logs'
+    default: ${{ github.token }}
   workflow-run-id:
     description: 'Specific workflow run ID to analyze (optional, defaults to current run)'
     required: false
-  analysis-api-endpoint:
-    description: 'API endpoint for log analysis (e.g., http://54.89.53.140:8080)'
+  retry-attempts:
+    description: 'Number of retry attempts for failed operations'
     required: false
-  api-username:
-    description: 'Username for API authentication'
+    default: '3'
+  retry-delay:
+    description: 'Initial delay between retries in seconds'
     required: false
-  api-password:
-    description: 'Password for API authentication'
-    required: false
-  analysis-timeout:
-    description: 'Timeout for analysis in seconds'
-    required: false
-    default: '300'
+    default: '2'
 
 outputs:
   s3-url:
     description: 'S3 URL where logs were uploaded'
-  analysis-status:
-    description: 'Status of the analysis (success, failed, timeout)'
-  issues-found:
-    description: 'Number of issues found in the analysis'
-  analysis-results:
-    description: 'JSON string containing analysis results'
+  upload-status:
+    description: 'Status of the upload process (success, failed)'
+  files-uploaded:
+    description: 'Number of files uploaded'
   auth-status:
-    description: 'Authentication status (success, failed, not-attempted, no-credentials)'
+    description: 'Authentication status (success, failed)'
   user-info:
     description: 'JSON string containing authenticated user information'
+  notification-status:
+    description: 'Status of the upload notification (success, failed)'
 
 runs:
   using: 'node20'
   main: 'dist/index.js'
 
 branding:
-  icon: 'search'
+  icon: 'upload-cloud'
   color: 'blue'
