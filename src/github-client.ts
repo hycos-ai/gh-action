@@ -57,6 +57,25 @@ export class GitHubClient {
         },
       };
     } catch (error) {
+      // When running locally with `act` there may be no real run ID – fall back to a mock.
+      if (process.env.ACT === 'true') {
+        core.warning('act environment detected – returning mock workflow run');
+        const now = new Date().toISOString();
+        return {
+          id: 0,
+          name: 'local-act-run',
+          status: 'completed',
+          conclusion: 'success',
+          created_at: now,
+          updated_at: now,
+          html_url: '',
+          repository: {
+            full_name: `${this.owner}/${this.repo}`,
+            html_url: `https://github.com/${this.owner}/${this.repo}`,
+          },
+        };
+      }
+
       core.error(`Failed to fetch workflow run: ${error}`);
       throw new Error(
         `Failed to fetch workflow run: ${error instanceof Error ? error.message : String(error)}`
@@ -138,6 +157,19 @@ export class GitHubClient {
    */
   async getAllWorkflowLogs(runId: number): Promise<LogContent[]> {
     try {
+      // Shortcut for act – create a single mock log and return.
+      if (process.env.ACT === 'true') {
+        core.warning('act environment detected – returning mock workflow logs');
+        return [
+          {
+            jobName: 'local-act-job',
+            jobId: 0,
+            content: 'This is a mock log generated during an act run.',
+            timestamp: new Date().toISOString(),
+          },
+        ];
+      }
+
       const jobs = await this.getWorkflowJobs(runId);
       core.info(`Found ${jobs.length} jobs to download logs for`);
 

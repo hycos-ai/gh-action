@@ -36,7 +36,6 @@ export class CredentialsClient {
         throw new Error('Not authenticated - please login first');
       }
 
-      // Make API call to get credentials
       const response = await this.httpClient.get<CloudCredentialsResponse>(
         `${this.baseUrl}/upload/cloud/credentials`,
         {
@@ -47,6 +46,24 @@ export class CredentialsClient {
 
       // Validate response structure
       if (!response.accessKeyId || !response.secretAccessKey || !response.bucket) {
+        core.warning(
+          `Received credentials response but required fields are missing. Response keys: ${Object.keys(
+            response as any
+          ).join(', ')}`
+        );
+
+        // If running under act, provide mock credentials so the flow can continue
+        if (process.env.ACT === 'true') {
+          core.warning('act environment detected – using mock S3 credentials');
+          return {
+            accessKeyId: '', // empty for public bucket test
+            secretAccessKey: '',
+            sessionToken: '',
+            expiration: new Date(Date.now() + 3600 * 1000).toISOString(),
+            bucket: 'mock-bucket',
+          };
+        }
+
         throw new Error('Invalid credentials response: missing required fields');
       }
 

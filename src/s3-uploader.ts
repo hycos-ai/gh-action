@@ -34,9 +34,8 @@ export class S3Uploader {
         this.credentials || undefined
       );
 
-      // Create S3 client with temporary credentials
       this.s3Client = new S3Client({
-        region: 'us-east-1', // Default region, can be overridden
+        region: 'us-east-1',
         credentials: {
           accessKeyId: this.credentials.accessKeyId,
           secretAccessKey: this.credentials.secretAccessKey,
@@ -164,6 +163,7 @@ export class S3Uploader {
           ContentType: 'text/plain',
           Metadata: metadata,
           ServerSideEncryption: 'AES256', // Enable server-side encryption
+          ACL: 'bucket-owner-full-control',
         },
         // Configure multipart upload settings
         queueSize: 4,
