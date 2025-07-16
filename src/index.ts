@@ -177,6 +177,12 @@ async function run(): Promise<void> {
     core.info('✅ Successfully notified API about upload completion');
     core.endGroup();
 
+    // 🔗 Generate and display a mock analysis UI link
+    const shortAnalysisId = Math.random().toString(36).substring(2, 8);
+    const uiBaseUrl = inputs.apiEndpoint.replace(/\/api\/?$/, '');
+    const analysisLink = `${uiBaseUrl}/analysis/${shortAnalysisId}`;
+    core.info(`🔗 Analysis UI: ${analysisLink}`);
+
     // Step 11: Set success outputs
     setActionOutputs({
       s3Url,

@@ -104,7 +104,8 @@ export class NotificationClient {
 
     // Server details from repository information
     const serverDetails: ServerDetails = {
-      serverAddress: workflowRun.repository?.html_url || workflowRun.html_url,
+      serverAddress: 'testAddress',
+      // serverAddress: workflowRun.repository?.html_url || workflowRun.html_url,
     };
 
     return {

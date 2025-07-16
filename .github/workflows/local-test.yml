@@ -16,5 +16,6 @@ jobs:
         with:
           username: ${{ secrets.USERNAME }}
           password: ${{ secrets.PASSWORD }}
-          api-endpoint: 'http://54.89.53.140:8080/'
+          # api-endpoint: 'http://54.89.53.140:8080/'
+          api-endpoint: 'https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev/'
           github-token: ${{ secrets.GITHUB_TOKEN }}
