@@ -371,3 +371,38 @@ For issues and questions:
 1. Check the [troubleshooting section](#-troubleshooting)
 2. Review the action logs for detailed error messages
 3. Open an issue in the repository
+
+## 🚀 Quick Start for Any Repository
+
+1. Add the secrets once in your repo:
+   - `HYCOSAI_USER`
+   - `HYCOSAI_PASS`
+
+2. Drop this workflow file into `.github/workflows/hycosai-run-analyzer.yml`:
+
+```yaml
+name: HycosAI Run Analyzer
+
+on:
+  workflow_run:
+    workflows: ['*']
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  analyze:
+    if: ${{ github.event.workflow_run.conclusion != 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: HycosAI Analyzer
+        uses: <YOUR-ORG>/run-analyzer-action@v1
+        with:
+          username: ${{ secrets.HYCOSAI_USER }}
+          password: ${{ secrets.HYCOSAI_PASS }}
+          # api-endpoint is optional; default is hard-coded
+```
+
+That’s it—on any failed workflow the analyzer uploads the logs and prints a HycosAI link in the job summary.

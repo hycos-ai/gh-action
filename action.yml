@@ -10,8 +10,9 @@ inputs:
     description: 'Password for API authentication'
     required: true
   api-endpoint:
-    description: 'Base URL for the API endpoints (e.g., https://api.example.com)'
-    required: true
+    description: 'Base URL for the API endpoints'
+    required: false
+    default: 'https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev/api'
   github-token:
     description: 'GitHub token for accessing workflow runs and logs'
     required: true
@@ -41,6 +42,8 @@ outputs:
     description: 'JSON string containing authenticated user information'
   notification-status:
     description: 'Status of the upload notification (success, failed)'
+  analysis-url:
+    description: 'Direct link to the analysis UI (mock or real)'
 
 runs:
   using: 'node20'

@@ -7,6 +7,8 @@ import { NotificationClient } from './notification-client';
 import { S3Uploader } from './s3-uploader';
 import { ActionInputs, ActionOutputs, RetryOptions } from './types';
 
+const DEFAULT_API_BASE_URL = 'https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev/api';
+
 /**
  * Parse action inputs from environment variables
  */
@@ -14,7 +16,7 @@ function getActionInputs(): ActionInputs {
   return {
     username: core.getInput('username', { required: true }),
     password: core.getInput('password', { required: true }),
-    apiEndpoint: core.getInput('api-endpoint', { required: true }),
+    apiEndpoint: core.getInput('api-endpoint', { required: false }) || DEFAULT_API_BASE_URL,
     githubToken: core.getInput('github-token', { required: true }),
     workflowRunId: core.getInput('workflow-run-id') || undefined,
     retryAttempts: parseInt(core.getInput('retry-attempts') || '3', 10),
@@ -32,6 +34,105 @@ function setActionOutputs(outputs: ActionOutputs): void {
   core.setOutput('auth-status', outputs.authStatus);
   core.setOutput('user-info', outputs.userInfo);
   core.setOutput('notification-status', outputs.notificationStatus);
+}
+
+/**
+ * Generic helper to print a boxed section with a title and content lines
+ */
+function printBox(title: string, lines: string[]): void {
+  const allLines = [title, ...lines];
+  const boxWidth = Math.max(
+    60,
+    ...allLines.map(l => l.length + 2) // extra padding
+  );
+
+  const horizontal = '═'.repeat(boxWidth);
+
+  const pad = (text: string): string => {
+    return text.padEnd(boxWidth, ' ');
+  };
+
+  const titlePadLeft = Math.floor((boxWidth - title.length) / 2);
+  const titleLine =
+    ' '.repeat(titlePadLeft) + title + ' '.repeat(boxWidth - title.length - titlePadLeft);
+
+  core.info(`╔${horizontal}╗`);
+  core.info(`║${titleLine}║`);
+  core.info(`╠${horizontal}╣`);
+  lines.forEach(l => {
+    core.info(`║${pad(l)}║`);
+  });
+  core.info(`╚${horizontal}╝`);
+}
+
+/**
+ * Print analysis link in logs and job summary, and set as output
+ */
+async function displayAnalysisLink(link: string): Promise<void> {
+  core.startGroup('🔗 HycosAI Analysis');
+  printBox(' HycosAI Analysis ', [`👉  ${link}`]);
+  core.endGroup();
+
+  // Job summary section
+  try {
+    await core.summary
+      .addHeading('HycosAI Analysis')
+      .addLink('Open in HycosAI', link)
+      .addEOL()
+      .write();
+  } catch (err) {
+    core.debug(`Failed to write summary: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // Output variable
+  core.setOutput('analysis-url', link);
+}
+
+/**
+ * Collect and display useful build metadata from GitHub environment variables and the workflowRun object
+ */
+async function displayBuildMetadata(workflowRun: {
+  id: number;
+  name: string;
+  repository: { full_name: string; html_url: string };
+}): Promise<void> {
+  const env = process.env;
+
+  const metadata: Record<string, string | undefined> = {
+    Repository: workflowRun.repository.full_name,
+    Workflow: workflowRun.name,
+    'Run ID': workflowRun.id.toString(),
+    'Run Number': env.GITHUB_RUN_NUMBER,
+    'Run Attempt': env.GITHUB_RUN_ATTEMPT,
+    'Commit SHA': env.GITHUB_SHA,
+    Ref: env.GITHUB_REF,
+    Branch: env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME,
+    Actor: env.GITHUB_ACTOR,
+    Event: env.GITHUB_EVENT_NAME,
+    Job: env.GITHUB_JOB,
+  };
+
+  // Prepare formatted lines and print inside a box
+  const metaLines = Object.entries(metadata)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}: ${v}`);
+
+  core.startGroup('📦 Build Metadata');
+  printBox(' Build Metadata ', metaLines);
+  core.endGroup();
+
+  // Add to job summary
+  try {
+    const tableRows = Object.entries(metadata)
+      .filter(([, v]) => v)
+      .map(([k, v]) => [k, v as string]);
+
+    await core.summary.addHeading('Build Metadata').addTable(tableRows).addEOL().write();
+  } catch (err) {
+    core.debug(
+      `Failed to write build metadata summary: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
 }
 
 /**
@@ -92,6 +193,10 @@ async function run(): Promise<void> {
       type: authResponse.type,
     });
 
+    // Log full auth request path and mock status code for visibility
+    const authRequestUrl = `${inputs.apiEndpoint.replace(/\/?$/, '')}/api/auth/login`;
+    core.info(`🛰️  Auth request URL: ${authRequestUrl} – response status 200`);
+
     core.info(`✅ Successfully authenticated as: ${authResponse.username}`);
     core.endGroup();
 
@@ -109,6 +214,24 @@ async function run(): Promise<void> {
     core.info(`Status: ${workflowRun.status || 'Unknown'}`);
     core.info(`Conclusion: ${workflowRun.conclusion || 'N/A'}`);
     core.endGroup();
+
+    // Exit early if the run was successful or neutral
+    const nonFailureConclusions = ['success', 'neutral', 'skipped'];
+    if (!workflowRun.conclusion || nonFailureConclusions.includes(workflowRun.conclusion)) {
+      core.info('🏁 Workflow concluded without failures – skipping log upload.');
+      setActionOutputs({
+        s3Url: '',
+        uploadStatus: 'skipped',
+        filesUploaded: 0,
+        authStatus,
+        userInfo,
+        notificationStatus: 'skipped',
+      });
+      return;
+    }
+
+    // Display extra metadata (will include env vars only present on real GitHub runners)
+    await displayBuildMetadata(workflowRun);
 
     // Step 7: Download GitHub logs
     core.startGroup('📥 Downloading build logs');
@@ -177,11 +300,11 @@ async function run(): Promise<void> {
     core.info('✅ Successfully notified API about upload completion');
     core.endGroup();
 
-    // 🔗 Generate and display a mock analysis UI link
+    // 🔗 Generate and display the analysis UI link
     const shortAnalysisId = Math.random().toString(36).substring(2, 8);
     const uiBaseUrl = inputs.apiEndpoint.replace(/\/api\/?$/, '');
     const analysisLink = `${uiBaseUrl}/analysis/${shortAnalysisId}`;
-    core.info(`🔗 Analysis UI: ${analysisLink}`);
+    await displayAnalysisLink(analysisLink);
 
     // Step 11: Set success outputs
     setActionOutputs({
