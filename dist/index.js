@@ -73825,9 +73825,11 @@ async function run() {
         core.info(`Status: ${workflowRun.status || 'Unknown'}`);
         core.info(`Conclusion: ${workflowRun.conclusion || 'N/A'}`);
         core.endGroup();
-        // Exit early if the run was successful or neutral
+        // Check if we're in act environment for testing
+        const isActEnvironment = process.env.ACT === 'true';
+        // Exit early if the run was successful or neutral (unless in act environment for testing)
         const nonFailureConclusions = ['success', 'neutral', 'skipped'];
-        if (!workflowRun.conclusion || nonFailureConclusions.includes(workflowRun.conclusion)) {
+        if (!isActEnvironment && (!workflowRun.conclusion || nonFailureConclusions.includes(workflowRun.conclusion))) {
             core.info('🏁 Workflow concluded without failures – skipping log upload.');
             setActionOutputs({
                 s3Url: '',
@@ -73838,6 +73840,9 @@ async function run() {
                 notificationStatus: 'skipped',
             });
             return;
+        }
+        if (isActEnvironment) {
+            core.info('🧪 Act environment detected – proceeding with full flow for testing');
         }
         // Display extra metadata (will include env vars only present on real GitHub runners)
         await displayBuildMetadata(workflowRun);
