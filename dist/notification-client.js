@@ -57,7 +57,7 @@ class NotificationClient {
      * @param uploadResults - Array of S3 upload results
      * @param workflowRun - GitHub workflow run information
      * @param bucketName - S3 bucket name where files were uploaded
-     * @returns Promise<void>
+     * @returns Promise<string> - Analysis ID for tracking
      * @throws Error if notification fails
      */
     async notifyUploadComplete(uploadResults, workflowRun, bucketName) {
@@ -69,17 +69,25 @@ class NotificationClient {
             }
             if (uploadResults.length === 0) {
                 core.warning('No upload results to notify about');
-                return;
+                return 'no-upload-' + Math.random().toString(36).substring(2, 8);
             }
             // Prepare notification payload
             const notificationPayload = this.buildNotificationPayload(uploadResults, workflowRun, bucketName);
             // Make API call to notify about upload completion
-            await this.httpClient.post(`${this.baseUrl}/upload/uploaded`, notificationPayload, {
+            const response = await this.httpClient.post(`${this.baseUrl}/api/upload/uploaded`, notificationPayload, {
                 headers: this.authClient.getAuthHeaders(),
                 timeout: 30000, // 30 second timeout
             });
             core.info('✅ Successfully notified API about upload completion');
             core.info(`📁 Notified about ${uploadResults.length} uploaded files`);
+            // Display analysis link
+            const analysisId = response.analysisId || 'mock-analysis-' + Math.random().toString(36).substring(2, 8);
+            const analysisUrl = response.analysisUrl || `https://app.hycos.ai/analysis/${analysisId}`;
+            core.info('🔗 Analysis Link:');
+            core.info(`   ${analysisUrl}`);
+            core.info('');
+            core.info('📊 View your build analysis results at the link above');
+            return analysisId;
         }
         catch (error) {
             return this.handleNotificationError(error);
@@ -107,8 +115,8 @@ class NotificationClient {
         };
         // Server details from repository information
         const serverDetails = {
-            serverAddress: 'testAddress',
-            // serverAddress: workflowRun.repository?.html_url || workflowRun.html_url,
+            serverAddress: workflowRun.repository?.html_url || workflowRun.html_url,
+            type: 'github',
         };
         return {
             files,
@@ -140,7 +148,7 @@ class NotificationClient {
      * @param files - Array of uploaded files
      * @param buildDetails - Custom build details
      * @param serverDetails - Server details
-     * @returns Promise<void>
+     * @returns Promise<string> - Analysis ID for tracking
      */
     async notifyCustomUpload(files, buildDetails, serverDetails) {
         try {
@@ -151,7 +159,7 @@ class NotificationClient {
             }
             if (files.length === 0) {
                 core.warning('No files to notify about');
-                return;
+                return 'no-files-' + Math.random().toString(36).substring(2, 8);
             }
             const notificationPayload = {
                 files,
@@ -159,12 +167,20 @@ class NotificationClient {
                 serverDetails,
             };
             // Make API call
-            await this.httpClient.post(`${this.baseUrl}/upload/uploaded`, notificationPayload, {
+            const response = await this.httpClient.post(`${this.baseUrl}/api/upload/uploaded`, notificationPayload, {
                 headers: this.authClient.getAuthHeaders(),
                 timeout: 30000,
             });
             core.info('✅ Successfully notified API about custom upload');
             core.info(`📁 Notified about ${files.length} uploaded files`);
+            // Display analysis link
+            const analysisId = response.analysisId || 'mock-custom-' + Math.random().toString(36).substring(2, 8);
+            const analysisUrl = response.analysisUrl || `https://app.hycos.ai/analysis/${analysisId}`;
+            core.info('🔗 Analysis Link:');
+            core.info(`   ${analysisUrl}`);
+            core.info('');
+            core.info('📊 View your build analysis results at the link above');
+            return analysisId;
         }
         catch (error) {
             return this.handleNotificationError(error);

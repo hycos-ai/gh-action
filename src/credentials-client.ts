@@ -37,7 +37,7 @@ export class CredentialsClient {
       }
 
       const response = await this.httpClient.get<CloudCredentialsResponse>(
-        `${this.baseUrl}/upload/cloud/credentials`,
+        `${this.baseUrl}/api/upload/cloud/credentials`,
         {
           headers: this.authClient.getAuthHeaders(),
           timeout: 30000, // 30 second timeout

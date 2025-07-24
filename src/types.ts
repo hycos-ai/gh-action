@@ -63,6 +63,7 @@ export interface BuildDetails {
  */
 export interface ServerDetails {
   serverAddress: string;
+  type: string;
 }
 
 /**
@@ -223,6 +224,16 @@ export interface TokenStorage {
   setToken(token: string): void;
   clearToken(): void;
   isTokenValid(): boolean;
+}
+
+/**
+ * Upload notification response from API
+ */
+export interface UploadNotificationResponse {
+  success: boolean;
+  analysisId: string;
+  analysisUrl?: string;
+  message?: string;
 }
 
 /**

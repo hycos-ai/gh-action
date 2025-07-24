@@ -64,7 +64,7 @@ class CredentialsClient {
             if (!this.authClient.isAuthenticated()) {
                 throw new Error('Not authenticated - please login first');
             }
-            const response = await this.httpClient.get(`${this.baseUrl}/upload/cloud/credentials`, {
+            const response = await this.httpClient.get(`${this.baseUrl}/api/upload/cloud/credentials`, {
                 headers: this.authClient.getAuthHeaders(),
                 timeout: 30000, // 30 second timeout
             });

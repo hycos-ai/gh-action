@@ -39,3 +39,4 @@ export declare class AnalysisClient {
     displayResults(result: AnalysisResult): void;
     private getSeverityEmoji;
 }
+//# sourceMappingURL=analysis-client.d.ts.map

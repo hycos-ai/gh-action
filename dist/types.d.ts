@@ -57,6 +57,7 @@ export interface BuildDetails {
  */
 export interface ServerDetails {
     serverAddress: string;
+    type: string;
 }
 /**
  * Upload notification request payload
@@ -205,6 +206,15 @@ export interface TokenStorage {
     isTokenValid(): boolean;
 }
 /**
+ * Upload notification response from API
+ */
+export interface UploadNotificationResponse {
+    success: boolean;
+    analysisId: string;
+    analysisUrl?: string;
+    message?: string;
+}
+/**
  * Generic API response wrapper
  */
 export interface ApiResponse<T> {
@@ -212,3 +222,4 @@ export interface ApiResponse<T> {
     status: number;
     message?: string;
 }
+//# sourceMappingURL=types.d.ts.map

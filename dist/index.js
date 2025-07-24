@@ -1,6 +1,1568 @@
 require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
+/***/ 8007:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.AuthClient = void 0;
+const core = __importStar(__nccwpck_require__(7484));
+const axios_1 = __importDefault(__nccwpck_require__(7269));
+/**
+ * Simple in-memory token storage implementation
+ */
+class MemoryTokenStorage {
+    token = null;
+    expiry = null;
+    getToken() {
+        if (!this.token) {
+            return null;
+        }
+        // Check if token is expired
+        if (this.expiry && new Date() > this.expiry) {
+            this.clearToken();
+            return null;
+        }
+        return this.token;
+    }
+    setToken(token) {
+        this.token = token;
+        // Set expiry to 1 hour from now if not specified
+        this.expiry = new Date(Date.now() + 60 * 60 * 1000);
+    }
+    clearToken() {
+        this.token = null;
+        this.expiry = null;
+    }
+    isTokenValid() {
+        return this.getToken() !== null;
+    }
+}
+/**
+ * HTTP client wrapper with retry logic
+ */
+class HttpClientWithRetry {
+    retryOptions;
+    constructor(retryOptions) {
+        this.retryOptions = retryOptions;
+    }
+    async get(url, config) {
+        return this.executeWithRetry(() => axios_1.default.get(url, config));
+    }
+    async post(url, data, config) {
+        return this.executeWithRetry(() => axios_1.default.post(url, data, config));
+    }
+    async put(url, data, config) {
+        return this.executeWithRetry(() => axios_1.default.put(url, data, config));
+    }
+    async delete(url, config) {
+        return this.executeWithRetry(() => axios_1.default.delete(url, config));
+    }
+    async executeWithRetry(operation) {
+        let lastError;
+        let delay = this.retryOptions.initialDelay;
+        for (let attempt = 1; attempt <= this.retryOptions.maxAttempts; attempt++) {
+            try {
+                const response = await operation();
+                return response.data;
+            }
+            catch (error) {
+                lastError = error;
+                if (attempt === this.retryOptions.maxAttempts) {
+                    break;
+                }
+                // Check if error is retryable
+                if (axios_1.default.isAxiosError(error)) {
+                    const status = error.response?.status || 0;
+                    // Don't retry on client errors (4xx) except for 429 (rate limit)
+                    if (status >= 400 && status < 500 && status !== 429) {
+                        break;
+                    }
+                }
+                core.warning(`Attempt ${attempt} failed, retrying in ${delay}ms...`);
+                await this.sleep(delay);
+                delay = Math.min(delay * this.retryOptions.backoffFactor, this.retryOptions.maxDelay);
+            }
+        }
+        throw lastError;
+    }
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+/**
+ * Authentication client following SOLID principles
+ */
+class AuthClient {
+    baseUrl;
+    tokenStorage;
+    httpClient;
+    userInfo = null;
+    constructor(baseUrl, tokenStorage, httpClient, retryOptions) {
+        // Ensure baseUrl ends with /api if not already included
+        this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+        if (!this.baseUrl.includes('/api')) {
+            this.baseUrl += '/api';
+        }
+        this.tokenStorage = tokenStorage || new MemoryTokenStorage();
+        this.httpClient =
+            httpClient ||
+                new HttpClientWithRetry(retryOptions || {
+                    maxAttempts: 3,
+                    initialDelay: 1000,
+                    maxDelay: 5000,
+                    backoffFactor: 2,
+                });
+    }
+    /**
+     * Login with username and password to get authentication token
+     */
+    async login(username, password) {
+        try {
+            core.info('🔐 Attempting to authenticate with API...');
+            const loginRequest = {
+                username,
+                password,
+            };
+            const response = await this.httpClient.post(`${this.baseUrl}/auth/login`, loginRequest, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'GitHub-Action-Secure-Log-Uploader/1.0',
+                },
+                timeout: 30000, // 30 second timeout for auth
+            });
+            // Validate response structure
+            if (!response.token || !response.username) {
+                throw new Error('Invalid authentication response: missing token or username');
+            }
+            // Store authentication data
+            this.tokenStorage.setToken(response.token);
+            this.userInfo = {
+                username: response.username,
+                roles: response.roles || [],
+            };
+            core.info(`✅ Successfully authenticated as: ${response.username}`);
+            if (response.roles && response.roles.length > 0) {
+                core.info(`🏷️  Roles: ${response.roles.join(', ')}`);
+            }
+            return response;
+        }
+        catch (error) {
+            return this.handleAuthError(error, 'login');
+        }
+    }
+    /**
+     * Get the current authentication token
+     */
+    getToken() {
+        return this.tokenStorage.getToken();
+    }
+    /**
+     * Get current user information
+     */
+    getUserInfo() {
+        return this.userInfo;
+    }
+    /**
+     * Check if currently authenticated
+     */
+    isAuthenticated() {
+        return this.tokenStorage.isTokenValid();
+    }
+    /**
+     * Get authentication headers for API requests
+     */
+    getAuthHeaders() {
+        const token = this.getToken();
+        if (!token) {
+            throw new Error('No valid authentication token available');
+        }
+        return {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'GitHub-Action-Secure-Log-Uploader/1.0',
+        };
+    }
+    /**
+     * Clear authentication data (logout)
+     */
+    logout() {
+        this.tokenStorage.clearToken();
+        this.userInfo = null;
+        core.info('🔓 Logged out successfully');
+    }
+    /**
+     * Test the authentication token with a simple API call
+     */
+    async validateToken() {
+        try {
+            if (!this.isAuthenticated()) {
+                return false;
+            }
+            // Make a simple request to validate token - using the cloud credentials endpoint
+            // as it's the next step in the flow and will validate the token
+            await this.httpClient.get(`${this.baseUrl}/upload/cloud/credentials`, {
+                headers: this.getAuthHeaders(),
+                timeout: 10000,
+            });
+            return true;
+        }
+        catch (error) {
+            if (axios_1.default.isAxiosError(error) && error.response?.status === 401) {
+                // Token is invalid, clear it
+                this.logout();
+            }
+            core.warning('⚠️  Token validation failed');
+            return false;
+        }
+    }
+    /**
+     * Handle authentication errors with detailed messaging
+     */
+    handleAuthError(error, operation) {
+        let errorMessage = `Authentication ${operation} failed`;
+        let statusCode = 0;
+        if (axios_1.default.isAxiosError(error)) {
+            const axiosError = error;
+            statusCode = axiosError.response?.status || 0;
+            if (axiosError.response?.data) {
+                const errorData = axiosError.response.data;
+                errorMessage = errorData.message || errorData.error || errorMessage;
+            }
+            else if (axiosError.message) {
+                errorMessage = axiosError.message;
+            }
+            // Handle specific HTTP status codes
+            switch (statusCode) {
+                case 401:
+                    core.error('🔐 Authentication failed: Invalid username or password');
+                    break;
+                case 403:
+                    core.error('🚫 Access forbidden: User may not have required permissions');
+                    break;
+                case 404:
+                    core.error('🔍 Authentication endpoint not found: Please check the API URL');
+                    break;
+                case 429:
+                    core.error('⏱️  Rate limit exceeded: Too many login attempts');
+                    break;
+                case 500:
+                    core.error('🔥 Server error: API is experiencing issues');
+                    break;
+                default:
+                    core.error(`❌ HTTP ${statusCode}: ${errorMessage}`);
+            }
+        }
+        else if (error instanceof Error) {
+            errorMessage = error.message;
+            core.error(`❌ ${errorMessage}`);
+        }
+        else {
+            core.error(`❌ Unknown error during ${operation}: ${String(error)}`);
+        }
+        throw new Error(errorMessage);
+    }
+}
+exports.AuthClient = AuthClient;
+//# sourceMappingURL=auth-client.js.map
+
+/***/ }),
+
+/***/ 7523:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.CredentialsClient = void 0;
+const core = __importStar(__nccwpck_require__(7484));
+/**
+ * Client for fetching cloud credentials from the API
+ * Follows Single Responsibility Principle by handling only credential fetching
+ */
+class CredentialsClient {
+    baseUrl;
+    authClient;
+    httpClient;
+    constructor(baseUrl, authClient, httpClient) {
+        // Ensure baseUrl ends with /api if not already included
+        this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+        if (!this.baseUrl.includes('/api')) {
+            this.baseUrl += '/api';
+        }
+        this.authClient = authClient;
+        this.httpClient = httpClient;
+    }
+    /**
+     * Fetch temporary AWS S3 credentials from the API
+     * @returns Promise<CloudCredentialsResponse> - The cloud credentials response
+     * @throws Error if authentication fails or API call fails
+     */
+    async getCloudCredentials() {
+        try {
+            core.info('☁️  Fetching temporary AWS S3 credentials...');
+            // Ensure we have a valid token
+            if (!this.authClient.isAuthenticated()) {
+                throw new Error('Not authenticated - please login first');
+            }
+            const response = await this.httpClient.get(`${this.baseUrl}/api/upload/cloud/credentials`, {
+                headers: this.authClient.getAuthHeaders(),
+                timeout: 30000, // 30 second timeout
+            });
+            // Validate response structure
+            if (!response.accessKeyId || !response.secretAccessKey || !response.bucket) {
+                core.warning(`Received credentials response but required fields are missing. Response keys: ${Object.keys(response).join(', ')}`);
+                // If running under act, provide mock credentials so the flow can continue
+                if (process.env.ACT === 'true') {
+                    core.warning('act environment detected – using mock S3 credentials');
+                    return {
+                        accessKeyId: '', // empty for public bucket test
+                        secretAccessKey: '',
+                        sessionToken: '',
+                        expiration: new Date(Date.now() + 3600 * 1000).toISOString(),
+                        bucket: 'mock-bucket',
+                    };
+                }
+                throw new Error('Invalid credentials response: missing required fields');
+            }
+            // Log success (without sensitive data)
+            core.info('✅ Successfully fetched cloud credentials');
+            core.info(`🪣 S3 Bucket: ${response.bucket}`);
+            if (response.expiration) {
+                const expirationDate = new Date(response.expiration);
+                const now = new Date();
+                const hoursUntilExpiration = Math.round((expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60));
+                core.info(`⏰ Credentials expire in ${hoursUntilExpiration} hours`);
+            }
+            return response;
+        }
+        catch (error) {
+            return this.handleCredentialsError(error);
+        }
+    }
+    /**
+     * Check if the provided credentials are still valid
+     * @param credentials - The credentials to validate
+     * @returns boolean - Whether the credentials are still valid
+     */
+    areCredentialsValid(credentials) {
+        if (!credentials.expiration) {
+            // If no expiration is provided, assume they're valid for now
+            return true;
+        }
+        const expirationDate = new Date(credentials.expiration);
+        const now = new Date();
+        // Add a 5-minute buffer to account for clock skew and processing time
+        const bufferTime = 5 * 60 * 1000; // 5 minutes in milliseconds
+        const effectiveExpiration = new Date(expirationDate.getTime() - bufferTime);
+        return now < effectiveExpiration;
+    }
+    /**
+     * Get fresh credentials if current ones are expired or about to expire
+     * @param currentCredentials - Current credentials to check
+     * @returns Promise<CloudCredentialsResponse> - Fresh credentials
+     */
+    async refreshCredentialsIfNeeded(currentCredentials) {
+        if (!currentCredentials || !this.areCredentialsValid(currentCredentials)) {
+            core.info('🔄 Refreshing expired or missing credentials...');
+            return this.getCloudCredentials();
+        }
+        core.info('✅ Current credentials are still valid');
+        return currentCredentials;
+    }
+    /**
+     * Handle credentials-related errors with detailed messaging
+     * @param error - The error to handle
+     * @throws Error - Always throws with appropriate error message
+     */
+    handleCredentialsError(error) {
+        let errorMessage = 'Failed to fetch cloud credentials';
+        if (error instanceof Error) {
+            errorMessage = error.message;
+        }
+        // Check for specific error conditions
+        if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+            core.error('🔐 Authentication failed: Token may be expired or invalid');
+            core.error('💡 Try re-running the action to get a fresh token');
+        }
+        else if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+            core.error('🚫 Access forbidden: User may not have permission to access cloud credentials');
+            core.error('💡 Check if your user account has the required roles');
+        }
+        else if (errorMessage.includes('404') || errorMessage.includes('Not Found')) {
+            core.error('🔍 Credentials endpoint not found: Please check the API URL');
+        }
+        else if (errorMessage.includes('429') || errorMessage.includes('Rate limit')) {
+            core.error('⏱️  Rate limit exceeded: Too many requests to the credentials endpoint');
+            core.error('💡 Wait a moment before retrying');
+        }
+        else if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
+            core.error('🔥 Server error: API is experiencing issues');
+            core.error('💡 Try again later or contact support');
+        }
+        else {
+            core.error(`❌ ${errorMessage}`);
+        }
+        throw new Error(errorMessage);
+    }
+}
+exports.CredentialsClient = CredentialsClient;
+//# sourceMappingURL=credentials-client.js.map
+
+/***/ }),
+
+/***/ 3472:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.GitHubClient = void 0;
+const core = __importStar(__nccwpck_require__(7484));
+const github_1 = __nccwpck_require__(3228);
+class GitHubClient {
+    octokit;
+    owner;
+    repo;
+    constructor(token) {
+        this.octokit = (0, github_1.getOctokit)(token);
+        // Get repository info from environment
+        const repository = process.env.GITHUB_REPOSITORY;
+        if (!repository) {
+            throw new Error('GITHUB_REPOSITORY environment variable not found');
+        }
+        const parts = repository.split('/');
+        if (parts.length !== 2) {
+            throw new Error(`Invalid repository format: ${repository}`);
+        }
+        this.owner = parts[0];
+        this.repo = parts[1];
+    }
+    /**
+     * Get workflow run by ID or current run
+     */
+    async getWorkflowRun(runId) {
+        try {
+            const currentRunId = runId || process.env.GITHUB_RUN_ID;
+            if (!currentRunId) {
+                throw new Error('No workflow run ID provided and GITHUB_RUN_ID not found');
+            }
+            core.info(`Fetching workflow run: ${currentRunId}`);
+            const { data: run } = await this.octokit.rest.actions.getWorkflowRun({
+                owner: this.owner,
+                repo: this.repo,
+                run_id: parseInt(currentRunId, 10),
+            });
+            return {
+                id: run.id,
+                name: run.name || 'Unknown Workflow',
+                status: run.status || null,
+                conclusion: run.conclusion,
+                created_at: run.created_at,
+                updated_at: run.updated_at,
+                html_url: run.html_url,
+                repository: {
+                    full_name: `${this.owner}/${this.repo}`,
+                    html_url: `https://github.com/${this.owner}/${this.repo}`,
+                },
+            };
+        }
+        catch (error) {
+            // When running locally with `act` there may be no real run ID – fall back to a mock.
+            if (process.env.ACT === 'true') {
+                core.warning('act environment detected – returning mock workflow run');
+                const now = new Date().toISOString();
+                return {
+                    id: 0,
+                    name: 'local-act-run',
+                    status: 'completed',
+                    conclusion: 'success',
+                    created_at: now,
+                    updated_at: now,
+                    html_url: '',
+                    repository: {
+                        full_name: `${this.owner}/${this.repo}`,
+                        html_url: `https://github.com/${this.owner}/${this.repo}`,
+                    },
+                };
+            }
+            core.error(`Failed to fetch workflow run: ${error}`);
+            throw new Error(`Failed to fetch workflow run: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    /**
+     * Get all jobs for a workflow run
+     */
+    async getWorkflowJobs(runId) {
+        try {
+            core.info(`Fetching jobs for workflow run: ${runId}`);
+            const { data } = await this.octokit.rest.actions.listJobsForWorkflowRun({
+                owner: this.owner,
+                repo: this.repo,
+                run_id: runId,
+            });
+            return data.jobs.map(job => ({
+                id: job.id,
+                name: job.name,
+                status: job.status,
+                conclusion: job.conclusion,
+                started_at: job.started_at,
+                completed_at: job.completed_at,
+                html_url: job.html_url || null,
+            }));
+        }
+        catch (error) {
+            core.error(`Failed to fetch workflow jobs: ${error}`);
+            throw new Error(`Failed to fetch workflow jobs: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    /**
+     * Download logs for a specific job
+     */
+    async getJobLogs(jobId, jobName) {
+        try {
+            core.info(`Downloading logs for job: ${jobName} (${jobId})`);
+            const response = await this.octokit.rest.actions.downloadJobLogsForWorkflowRun({
+                owner: this.owner,
+                repo: this.repo,
+                job_id: jobId,
+            });
+            // The response is a redirect URL to the actual logs
+            const logsResponse = await fetch(response.url);
+            if (!logsResponse.ok) {
+                throw new Error(`Failed to download logs: ${logsResponse.statusText}`);
+            }
+            const logContent = await logsResponse.text();
+            return {
+                jobName,
+                jobId,
+                content: logContent,
+                timestamp: new Date().toISOString(),
+            };
+        }
+        catch (error) {
+            core.warning(`Failed to download logs for job ${jobName}: ${error}`);
+            // Return empty content instead of failing completely
+            return {
+                jobName,
+                jobId,
+                content: `Failed to download logs: ${error instanceof Error ? error.message : String(error)}`,
+                timestamp: new Date().toISOString(),
+            };
+        }
+    }
+    /**
+     * Download logs for all jobs in a workflow run
+     */
+    async getAllWorkflowLogs(runId) {
+        try {
+            // Shortcut for act – create a single mock log and return.
+            if (process.env.ACT === 'true') {
+                core.warning('act environment detected – returning mock workflow logs');
+                return [
+                    {
+                        jobName: 'local-act-job',
+                        jobId: 0,
+                        content: 'This is a mock log generated during an act run.',
+                        timestamp: new Date().toISOString(),
+                    },
+                ];
+            }
+            const jobs = await this.getWorkflowJobs(runId);
+            core.info(`Found ${jobs.length} jobs to download logs for`);
+            const logPromises = jobs.map(job => this.getJobLogs(job.id, job.name));
+            const logs = await Promise.all(logPromises);
+            const successfulLogs = logs.filter(log => !log.content.startsWith('Failed to download logs'));
+            core.info(`Successfully downloaded logs for ${successfulLogs.length}/${jobs.length} jobs`);
+            return logs;
+        }
+        catch (error) {
+            core.error(`Failed to download workflow logs: ${error}`);
+            throw new Error(`Failed to download workflow logs: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+}
+exports.GitHubClient = GitHubClient;
+//# sourceMappingURL=github-client.js.map
+
+/***/ }),
+
+/***/ 137:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const core = __importStar(__nccwpck_require__(7484));
+const axios_1 = __importDefault(__nccwpck_require__(7269));
+const auth_client_1 = __nccwpck_require__(8007);
+const credentials_client_1 = __nccwpck_require__(7523);
+const github_client_1 = __nccwpck_require__(3472);
+const notification_client_1 = __nccwpck_require__(7176);
+const s3_uploader_1 = __nccwpck_require__(1134);
+const DEFAULT_API_BASE_URL = 'https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev/api';
+/**
+ * Parse action inputs from environment variables
+ */
+function getActionInputs() {
+    return {
+        username: core.getInput('username', { required: true }),
+        password: core.getInput('password', { required: true }),
+        apiEndpoint: core.getInput('api-endpoint', { required: false }) || DEFAULT_API_BASE_URL,
+        githubToken: core.getInput('github-token', { required: true }),
+        workflowRunId: core.getInput('workflow-run-id') || undefined,
+        retryAttempts: parseInt(core.getInput('retry-attempts') || '3', 10),
+        retryDelay: parseInt(core.getInput('retry-delay') || '2', 10),
+    };
+}
+/**
+ * Set action outputs
+ */
+function setActionOutputs(outputs) {
+    core.setOutput('s3-url', outputs.s3Url);
+    core.setOutput('upload-status', outputs.uploadStatus);
+    core.setOutput('files-uploaded', outputs.filesUploaded.toString());
+    core.setOutput('auth-status', outputs.authStatus);
+    core.setOutput('user-info', outputs.userInfo);
+    core.setOutput('notification-status', outputs.notificationStatus);
+}
+/**
+ * Generic helper to print a boxed section with a title and content lines
+ */
+function printBox(title, lines) {
+    const allLines = [title, ...lines];
+    const boxWidth = Math.max(60, ...allLines.map(l => l.length + 2) // extra padding
+    );
+    const horizontal = '═'.repeat(boxWidth);
+    const pad = (text) => {
+        return text.padEnd(boxWidth, ' ');
+    };
+    const titlePadLeft = Math.floor((boxWidth - title.length) / 2);
+    const titleLine = ' '.repeat(titlePadLeft) + title + ' '.repeat(boxWidth - title.length - titlePadLeft);
+    core.info(`╔${horizontal}╗`);
+    core.info(`║${titleLine}║`);
+    core.info(`╠${horizontal}╣`);
+    lines.forEach(l => {
+        core.info(`║${pad(l)}║`);
+    });
+    core.info(`╚${horizontal}╝`);
+}
+/**
+ * Print analysis link in logs and job summary, and set as output
+ */
+async function displayAnalysisLink(link) {
+    core.startGroup('🔗 HycosAI Analysis');
+    printBox(' HycosAI Analysis ', [`👉  ${link}`]);
+    core.endGroup();
+    // Job summary section
+    try {
+        await core.summary
+            .addHeading('HycosAI Analysis')
+            .addLink('Open in HycosAI', link)
+            .addEOL()
+            .write();
+    }
+    catch (err) {
+        core.debug(`Failed to write summary: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    // Output variable
+    core.setOutput('analysis-url', link);
+}
+/**
+ * Collect and display useful build metadata from GitHub environment variables and the workflowRun object
+ */
+async function displayBuildMetadata(workflowRun) {
+    const env = process.env;
+    const metadata = {
+        Repository: workflowRun.repository.full_name,
+        Workflow: workflowRun.name,
+        'Run ID': workflowRun.id.toString(),
+        'Run Number': env.GITHUB_RUN_NUMBER,
+        'Run Attempt': env.GITHUB_RUN_ATTEMPT,
+        'Commit SHA': env.GITHUB_SHA,
+        Ref: env.GITHUB_REF,
+        Branch: env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME,
+        Actor: env.GITHUB_ACTOR,
+        Event: env.GITHUB_EVENT_NAME,
+        Job: env.GITHUB_JOB,
+    };
+    // Prepare formatted lines and print inside a box
+    const metaLines = Object.entries(metadata)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k}: ${v}`);
+    core.startGroup('📦 Build Metadata');
+    printBox(' Build Metadata ', metaLines);
+    core.endGroup();
+    // Add to job summary
+    try {
+        const tableRows = Object.entries(metadata)
+            .filter(([, v]) => v)
+            .map(([k, v]) => [k, v]);
+        await core.summary.addHeading('Build Metadata').addTable(tableRows).addEOL().write();
+    }
+    catch (err) {
+        core.debug(`Failed to write build metadata summary: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
+/**
+ * Main action execution following the specified flow
+ */
+async function run() {
+    let authStatus = 'failed';
+    let userInfo = '';
+    let uploadStatus = 'failed';
+    let filesUploaded = 0;
+    let notificationStatus = 'failed';
+    let s3Url = '';
+    try {
+        core.info('🚀 Starting Secure Build Log Uploader Action');
+        // Step 1: Parse and validate inputs
+        const inputs = getActionInputs();
+        core.info('✅ Action inputs validated');
+        // Step 2: Setup retry options
+        const retryOptions = {
+            maxAttempts: inputs.retryAttempts,
+            initialDelay: inputs.retryDelay * 1000, // Convert to milliseconds
+            maxDelay: 30000, // 30 seconds max delay
+            backoffFactor: 2,
+        };
+        // Step 3: Initialize HTTP client wrapper
+        const httpClient = {
+            get: async (url, config) => {
+                const response = await axios_1.default.get(url, config);
+                return response.data;
+            },
+            post: async (url, data, config) => {
+                const response = await axios_1.default.post(url, data, config);
+                return response.data;
+            },
+            put: async (url, data, config) => {
+                const response = await axios_1.default.put(url, data, config);
+                return response.data;
+            },
+            delete: async (url, config) => {
+                const response = await axios_1.default.delete(url, config);
+                return response.data;
+            },
+        };
+        // Step 4: Authenticate with the API
+        core.startGroup('🔐 Authenticating with API');
+        const authClient = new auth_client_1.AuthClient(inputs.apiEndpoint, undefined, httpClient, retryOptions);
+        const authResponse = await authClient.login(inputs.username, inputs.password);
+        authStatus = 'success';
+        userInfo = JSON.stringify({
+            username: authResponse.username,
+            roles: authResponse.roles,
+            type: authResponse.type,
+        });
+        // Log full auth request path and mock status code for visibility
+        const authRequestUrl = `${inputs.apiEndpoint.replace(/\/?$/, '')}/api/auth/login`;
+        core.info(`🛰️  Auth request URL: ${authRequestUrl} – response status 200`);
+        core.info(`✅ Successfully authenticated as: ${authResponse.username}`);
+        core.endGroup();
+        // Step 5: Initialize GitHub client
+        core.startGroup('🐙 Initializing GitHub client');
+        const githubClient = new github_client_1.GitHubClient(inputs.githubToken);
+        core.info('✅ GitHub client initialized');
+        core.endGroup();
+        // Step 6: Get workflow information
+        core.startGroup('📋 Fetching workflow information');
+        const workflowRun = await githubClient.getWorkflowRun(inputs.workflowRunId);
+        core.info(`Workflow: ${workflowRun.name}`);
+        core.info(`Run ID: ${workflowRun.id}`);
+        core.info(`Status: ${workflowRun.status || 'Unknown'}`);
+        core.info(`Conclusion: ${workflowRun.conclusion || 'N/A'}`);
+        core.endGroup();
+        // Check if we're in act environment for testing
+        const isActEnvironment = process.env.ACT === 'true';
+        // Exit early if the run was successful or neutral (unless in act environment for testing)
+        const nonFailureConclusions = ['success', 'neutral', 'skipped'];
+        if (!isActEnvironment && (!workflowRun.conclusion || nonFailureConclusions.includes(workflowRun.conclusion))) {
+            core.info('🏁 Workflow concluded without failures – skipping log upload.');
+            setActionOutputs({
+                s3Url: '',
+                uploadStatus: 'skipped',
+                filesUploaded: 0,
+                authStatus,
+                userInfo,
+                notificationStatus: 'skipped',
+            });
+            return;
+        }
+        if (isActEnvironment) {
+            core.info('🧪 Act environment detected – proceeding with full flow for testing');
+        }
+        // Display extra metadata (will include env vars only present on real GitHub runners)
+        await displayBuildMetadata(workflowRun);
+        // Step 7: Download GitHub logs
+        core.startGroup('📥 Downloading build logs');
+        const logs = await githubClient.getAllWorkflowLogs(workflowRun.id);
+        if (logs.length === 0) {
+            core.warning('No logs found for this workflow run');
+            setActionOutputs({
+                s3Url: '',
+                uploadStatus: 'failed',
+                filesUploaded: 0,
+                authStatus,
+                userInfo,
+                notificationStatus: 'not-attempted',
+            });
+            return;
+        }
+        core.info(`📄 Downloaded ${logs.length} log files`);
+        const totalLogSize = logs.reduce((sum, log) => sum + log.content.length, 0);
+        core.info(`📊 Total log size: ${(totalLogSize / 1024 / 1024).toFixed(2)} MB`);
+        core.endGroup();
+        // Step 8: Initialize credentials client and S3 uploader
+        core.startGroup('☁️ Setting up S3 upload');
+        const credentialsClient = new credentials_client_1.CredentialsClient(inputs.apiEndpoint, authClient, httpClient);
+        const s3Uploader = new s3_uploader_1.S3Uploader(credentialsClient, retryOptions);
+        core.info('✅ S3 uploader initialized');
+        core.endGroup();
+        // Step 9: Upload logs to S3
+        core.startGroup('📤 Uploading logs to S3');
+        const uploadResults = await s3Uploader.uploadAllLogs(logs, workflowRun.id, workflowRun.name);
+        if (uploadResults.length === 0) {
+            throw new Error('Failed to upload any logs to S3');
+        }
+        // Also create a consolidated log file
+        const consolidatedResult = await s3Uploader.uploadConsolidatedLogs(logs, workflowRun.id, workflowRun.name);
+        uploadResults.push(consolidatedResult);
+        uploadStatus = 'success';
+        filesUploaded = uploadResults.length;
+        s3Url = uploadResults[0]?.location || '';
+        core.info(`✅ Successfully uploaded ${uploadResults.length} files to S3`);
+        core.info(`📍 Primary S3 URL: ${s3Url}`);
+        core.endGroup();
+        // Step 10: Notify API about successful upload
+        core.startGroup('📢 Notifying API about upload completion');
+        const notificationClient = new notification_client_1.NotificationClient(inputs.apiEndpoint, authClient, httpClient);
+        const analysisId = await notificationClient.notifyUploadComplete(uploadResults, workflowRun, s3Uploader.getBucket());
+        notificationStatus = 'success';
+        core.info('✅ Successfully notified API about upload completion');
+        core.endGroup();
+        // 🔗 Generate and display the analysis UI link (using actual analysis ID)
+        const uiBaseUrl = inputs.apiEndpoint.replace(/\/api\/?$/, '');
+        const analysisLink = `https://app.hycos.ai/analysis/${analysisId}`;
+        await displayAnalysisLink(analysisLink);
+        // Step 11: Set success outputs
+        setActionOutputs({
+            s3Url,
+            uploadStatus,
+            filesUploaded,
+            authStatus,
+            userInfo,
+            notificationStatus,
+        });
+        core.info('🎉 Secure Build Log Uploader completed successfully!');
+        core.info(`📊 Summary: ${filesUploaded} files uploaded and API notified`);
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        core.setFailed(`Action failed: ${errorMessage}`);
+        // Set failure outputs
+        setActionOutputs({
+            s3Url,
+            uploadStatus,
+            filesUploaded,
+            authStatus,
+            userInfo,
+            notificationStatus,
+        });
+        // Log error details for debugging
+        core.error(`❌ Action failed with error: ${errorMessage}`);
+        if (error instanceof Error && error.stack) {
+            core.debug(`Error stack: ${error.stack}`);
+        }
+        // Provide helpful troubleshooting information
+        core.startGroup('🔍 Troubleshooting Information');
+        core.info('Please check the following:');
+        core.info('• API endpoint is correct and accessible');
+        core.info('• Username and password are valid');
+        core.info('• GitHub token has necessary permissions');
+        core.info('• Network connectivity is stable');
+        core.info('• API service is operational');
+        core.endGroup();
+        throw error;
+    }
+}
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+    core.error(`Unhandled promise rejection at: ${promise}, reason: ${reason}`);
+    process.exit(1);
+});
+// Handle uncaught exceptions
+process.on('uncaughtException', error => {
+    core.error(`Uncaught exception: ${error.message}`);
+    if (error.stack) {
+        core.debug(`Exception stack: ${error.stack}`);
+    }
+    process.exit(1);
+});
+// Run the action
+if (require.main === require.cache[eval('__filename')]) {
+    run().catch(error => {
+        core.setFailed(`Action execution failed: ${error.message}`);
+        process.exit(1);
+    });
+}
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 7176:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.NotificationClient = void 0;
+const core = __importStar(__nccwpck_require__(7484));
+/**
+ * Client for notifying the API after successful upload
+ * Follows Single Responsibility Principle by handling only upload notifications
+ */
+class NotificationClient {
+    baseUrl;
+    authClient;
+    httpClient;
+    constructor(baseUrl, authClient, httpClient) {
+        // Ensure baseUrl ends with /api if not already included
+        this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+        if (!this.baseUrl.includes('/api')) {
+            this.baseUrl += '/api';
+        }
+        this.authClient = authClient;
+        this.httpClient = httpClient;
+    }
+    /**
+     * Notify the API about successful upload completion
+     * @param uploadResults - Array of S3 upload results
+     * @param workflowRun - GitHub workflow run information
+     * @param bucketName - S3 bucket name where files were uploaded
+     * @returns Promise<string> - Analysis ID for tracking
+     * @throws Error if notification fails
+     */
+    async notifyUploadComplete(uploadResults, workflowRun, bucketName) {
+        try {
+            core.info('📢 Notifying API about successful upload completion...');
+            // Ensure we have a valid token
+            if (!this.authClient.isAuthenticated()) {
+                throw new Error('Not authenticated - please login first');
+            }
+            if (uploadResults.length === 0) {
+                core.warning('No upload results to notify about');
+                return 'no-upload-' + Math.random().toString(36).substring(2, 8);
+            }
+            // Prepare notification payload
+            const notificationPayload = this.buildNotificationPayload(uploadResults, workflowRun, bucketName);
+            // Make API call to notify about upload completion
+            const response = await this.httpClient.post(`${this.baseUrl}/api/upload/uploaded`, notificationPayload, {
+                headers: this.authClient.getAuthHeaders(),
+                timeout: 30000, // 30 second timeout
+            });
+            core.info('✅ Successfully notified API about upload completion');
+            core.info(`📁 Notified about ${uploadResults.length} uploaded files`);
+            // Display analysis link
+            const analysisId = response.analysisId || 'mock-analysis-' + Math.random().toString(36).substring(2, 8);
+            const analysisUrl = response.analysisUrl || `https://app.hycos.ai/analysis/${analysisId}`;
+            core.info('🔗 Analysis Link:');
+            core.info(`   ${analysisUrl}`);
+            core.info('');
+            core.info('📊 View your build analysis results at the link above');
+            return analysisId;
+        }
+        catch (error) {
+            return this.handleNotificationError(error);
+        }
+    }
+    /**
+     * Build the notification payload from upload results and workflow information
+     * @param uploadResults - Array of S3 upload results
+     * @param workflowRun - GitHub workflow run information
+     * @param bucketName - S3 bucket name
+     * @returns UploadNotificationRequest
+     */
+    buildNotificationPayload(uploadResults, workflowRun, bucketName) {
+        // Convert S3 upload results to uploaded files
+        const files = uploadResults.map(result => ({
+            filename: this.extractFilenameFromKey(result.key),
+            fileType: 'LOG',
+            bucketName: bucketName,
+        }));
+        // Build details from workflow run
+        const buildDetails = {
+            folder: this.generateBuildFolder(workflowRun),
+            jobName: workflowRun.name,
+            buildNumber: workflowRun.id,
+        };
+        // Server details from repository information
+        const serverDetails = {
+            serverAddress: workflowRun.repository?.html_url || workflowRun.html_url,
+            type: 'github',
+        };
+        return {
+            files,
+            buildDetails,
+            serverDetails,
+        };
+    }
+    /**
+     * Extract filename from S3 key
+     * @param key - S3 object key
+     * @returns filename
+     */
+    extractFilenameFromKey(key) {
+        const parts = key.split('/');
+        return parts[parts.length - 1] || key;
+    }
+    /**
+     * Generate build folder name from workflow run
+     * @param workflowRun - GitHub workflow run information
+     * @returns folder name
+     */
+    generateBuildFolder(workflowRun) {
+        const date = new Date(workflowRun.created_at).toISOString().split('T')[0];
+        const repoName = workflowRun.repository?.full_name || 'unknown-repo';
+        return `${repoName}/${date}/${workflowRun.id}`;
+    }
+    /**
+     * Notify about specific files with custom build details
+     * @param files - Array of uploaded files
+     * @param buildDetails - Custom build details
+     * @param serverDetails - Server details
+     * @returns Promise<string> - Analysis ID for tracking
+     */
+    async notifyCustomUpload(files, buildDetails, serverDetails) {
+        try {
+            core.info('📢 Notifying API about custom upload...');
+            // Ensure we have a valid token
+            if (!this.authClient.isAuthenticated()) {
+                throw new Error('Not authenticated - please login first');
+            }
+            if (files.length === 0) {
+                core.warning('No files to notify about');
+                return 'no-files-' + Math.random().toString(36).substring(2, 8);
+            }
+            const notificationPayload = {
+                files,
+                buildDetails,
+                serverDetails,
+            };
+            // Make API call
+            const response = await this.httpClient.post(`${this.baseUrl}/api/upload/uploaded`, notificationPayload, {
+                headers: this.authClient.getAuthHeaders(),
+                timeout: 30000,
+            });
+            core.info('✅ Successfully notified API about custom upload');
+            core.info(`📁 Notified about ${files.length} uploaded files`);
+            // Display analysis link
+            const analysisId = response.analysisId || 'mock-custom-' + Math.random().toString(36).substring(2, 8);
+            const analysisUrl = response.analysisUrl || `https://app.hycos.ai/analysis/${analysisId}`;
+            core.info('🔗 Analysis Link:');
+            core.info(`   ${analysisUrl}`);
+            core.info('');
+            core.info('📊 View your build analysis results at the link above');
+            return analysisId;
+        }
+        catch (error) {
+            return this.handleNotificationError(error);
+        }
+    }
+    /**
+     * Handle notification errors with detailed messaging
+     * @param error - The error to handle
+     * @throws Error - Always throws with appropriate error message
+     */
+    handleNotificationError(error) {
+        let errorMessage = 'Failed to notify API about upload completion';
+        if (error instanceof Error) {
+            errorMessage = error.message;
+        }
+        // Check for specific error conditions
+        if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+            core.error('🔐 Authentication failed: Token may be expired or invalid');
+            core.error('💡 Try re-running the action to get a fresh token');
+        }
+        else if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+            core.error('🚫 Access forbidden: User may not have permission to send notifications');
+            core.error('💡 Check if your user account has the required roles for upload notifications');
+        }
+        else if (errorMessage.includes('404') || errorMessage.includes('Not Found')) {
+            core.error('🔍 Notification endpoint not found: Please check the API URL');
+        }
+        else if (errorMessage.includes('429') || errorMessage.includes('Rate limit')) {
+            core.error('⏱️  Rate limit exceeded: Too many requests to the notification endpoint');
+            core.error('💡 Wait a moment before retrying');
+        }
+        else if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
+            core.error('🔥 Server error: API is experiencing issues');
+            core.error('💡 Try again later or contact support');
+        }
+        else {
+            core.error(`❌ ${errorMessage}`);
+        }
+        // Log detailed information for debugging
+        core.debug(`Notification error details: ${JSON.stringify(error, null, 2)}`);
+        throw new Error(errorMessage);
+    }
+}
+exports.NotificationClient = NotificationClient;
+//# sourceMappingURL=notification-client.js.map
+
+/***/ }),
+
+/***/ 1134:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.S3Uploader = void 0;
+const core = __importStar(__nccwpck_require__(7484));
+const client_s3_1 = __nccwpck_require__(3711);
+const lib_storage_1 = __nccwpck_require__(2358);
+/**
+ * S3 Uploader with temporary credentials and retry logic
+ * Follows SOLID principles with dependency injection
+ */
+class S3Uploader {
+    s3Client = null;
+    credentials = null;
+    credentialsClient;
+    retryOptions;
+    constructor(credentialsClient, retryOptions) {
+        this.credentialsClient = credentialsClient;
+        this.retryOptions = retryOptions || {
+            maxAttempts: 3,
+            initialDelay: 1000,
+            maxDelay: 10000,
+            backoffFactor: 2,
+        };
+    }
+    /**
+     * Initialize or refresh S3 client with current credentials
+     */
+    async initializeS3Client() {
+        try {
+            // Get fresh credentials if needed
+            this.credentials = await this.credentialsClient.refreshCredentialsIfNeeded(this.credentials || undefined);
+            this.s3Client = new client_s3_1.S3Client({
+                region: 'us-east-1',
+                credentials: {
+                    accessKeyId: this.credentials.accessKeyId,
+                    secretAccessKey: this.credentials.secretAccessKey,
+                    sessionToken: this.credentials.sessionToken,
+                },
+                maxAttempts: this.retryOptions.maxAttempts,
+                retryMode: 'adaptive',
+            });
+            core.info('✅ S3 client initialized with temporary credentials');
+        }
+        catch (error) {
+            core.error(`Failed to initialize S3 client: ${error}`);
+            throw new Error(`S3 client initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    /**
+     * Generate S3 key for log file
+     */
+    generateS3Key(workflowRunId, jobName, timestamp) {
+        const date = new Date(timestamp).toISOString().split('T')[0]; // YYYY-MM-DD
+        const sanitizedJobName = jobName.replace(/[^a-zA-Z0-9-_]/g, '_');
+        const timestampSuffix = new Date(timestamp).getTime();
+        return `build-logs/${date}/${workflowRunId}/${sanitizedJobName}_${timestampSuffix}.log`;
+    }
+    /**
+     * Execute operation with retry logic
+     */
+    async executeWithRetry(operation, operationName) {
+        let lastError;
+        let delay = this.retryOptions.initialDelay;
+        for (let attempt = 1; attempt <= this.retryOptions.maxAttempts; attempt++) {
+            try {
+                return await operation();
+            }
+            catch (error) {
+                lastError = error;
+                if (attempt === this.retryOptions.maxAttempts) {
+                    break;
+                }
+                // Check if credentials need refreshing
+                if (this.isCredentialsError(error)) {
+                    core.warning(`Credentials may be expired, refreshing... (attempt ${attempt})`);
+                    await this.initializeS3Client();
+                }
+                core.warning(`${operationName} failed (attempt ${attempt}/${this.retryOptions.maxAttempts}), retrying in ${delay}ms...`);
+                await this.sleep(delay);
+                delay = Math.min(delay * this.retryOptions.backoffFactor, this.retryOptions.maxDelay);
+            }
+        }
+        throw lastError;
+    }
+    /**
+     * Check if error is related to credentials
+     */
+    isCredentialsError(error) {
+        const errorMessage = error?.message || error?.toString() || '';
+        return (errorMessage.includes('InvalidAccessKeyId') ||
+            errorMessage.includes('SignatureDoesNotMatch') ||
+            errorMessage.includes('TokenRefreshRequired') ||
+            errorMessage.includes('ExpiredToken') ||
+            errorMessage.includes('Forbidden'));
+    }
+    /**
+     * Sleep for specified milliseconds
+     */
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    /**
+     * Upload a single log file to S3
+     */
+    async uploadLogFile(logContent, workflowRunId, workflowName) {
+        return this.executeWithRetry(async () => {
+            // Ensure S3 client is initialized with valid credentials
+            if (!this.s3Client || !this.credentials) {
+                await this.initializeS3Client();
+            }
+            if (!this.s3Client || !this.credentials) {
+                throw new Error('Failed to initialize S3 client');
+            }
+            const s3Key = this.generateS3Key(workflowRunId, logContent.jobName, logContent.timestamp);
+            core.info(`Uploading log for job "${logContent.jobName}" to S3: ${s3Key}`);
+            // Prepare metadata
+            const metadata = {
+                'workflow-run-id': workflowRunId.toString(),
+                'workflow-name': workflowName,
+                'job-name': logContent.jobName,
+                'job-id': logContent.jobId.toString(),
+                'upload-timestamp': new Date().toISOString(),
+            };
+            // Use multipart upload for better reliability with large files
+            const upload = new lib_storage_1.Upload({
+                client: this.s3Client,
+                params: {
+                    Bucket: this.credentials.bucket,
+                    Key: s3Key,
+                    Body: logContent.content,
+                    ContentType: 'text/plain',
+                    Metadata: metadata,
+                    ServerSideEncryption: 'AES256', // Enable server-side encryption
+                    ACL: 'bucket-owner-full-control',
+                },
+                // Configure multipart upload settings
+                queueSize: 4,
+                partSize: 1024 * 1024 * 5, // 5MB parts
+                leavePartsOnError: false,
+            });
+            // Add progress tracking
+            upload.on('httpUploadProgress', progress => {
+                if (progress.total && progress.loaded !== undefined) {
+                    const percentage = Math.round((progress.loaded / progress.total) * 100);
+                    core.info(`Upload progress for ${logContent.jobName}: ${percentage}%`);
+                }
+            });
+            const result = await upload.done();
+            const s3Result = {
+                location: result.Location || `https://${this.credentials.bucket}.s3.amazonaws.com/${s3Key}`,
+                bucket: this.credentials.bucket,
+                key: s3Key,
+                etag: result.ETag || '',
+            };
+            core.info(`✅ Successfully uploaded log for job "${logContent.jobName}"`);
+            return s3Result;
+        }, `Upload log for job "${logContent.jobName}"`);
+    }
+    /**
+     * Upload all logs to S3 with controlled concurrency
+     */
+    async uploadAllLogs(logs, workflowRunId, workflowName) {
+        if (logs.length === 0) {
+            core.warning('No logs to upload');
+            return [];
+        }
+        core.info(`Starting upload of ${logs.length} log files to S3`);
+        try {
+            // Upload logs in parallel with controlled concurrency (max 3 at a time)
+            const concurrencyLimit = 3;
+            const results = [];
+            const errors = [];
+            for (let i = 0; i < logs.length; i += concurrencyLimit) {
+                const batch = logs.slice(i, i + concurrencyLimit);
+                const batchPromises = batch.map(log => this.uploadLogFile(log, workflowRunId, workflowName).catch(error => {
+                    errors.push(`${log.jobName}: ${error.message}`);
+                    return null;
+                }));
+                const batchResults = await Promise.all(batchPromises);
+                results.push(...batchResults.filter(result => result !== null));
+            }
+            if (errors.length > 0) {
+                core.warning(`Failed to upload ${errors.length} log files:`);
+                errors.forEach(error => core.warning(`  - ${error}`));
+            }
+            core.info(`✅ Successfully uploaded ${results.length}/${logs.length} log files to S3`);
+            return results;
+        }
+        catch (error) {
+            core.error(`Batch upload failed: ${error}`);
+            throw new Error(`Batch S3 upload failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    /**
+     * Create a consolidated log file and upload it
+     */
+    async uploadConsolidatedLogs(logs, workflowRunId, workflowName) {
+        try {
+            core.info('Creating consolidated log file');
+            // Create consolidated log content
+            const consolidatedContent = logs
+                .map(log => {
+                const separator = '='.repeat(80);
+                return [
+                    separator,
+                    `JOB: ${log.jobName} (ID: ${log.jobId})`,
+                    `TIMESTAMP: ${log.timestamp}`,
+                    separator,
+                    log.content,
+                    '', // Empty line for spacing
+                ].join('\n');
+            })
+                .join('\n');
+            const consolidatedLog = {
+                jobName: 'consolidated',
+                jobId: 0,
+                content: consolidatedContent,
+                timestamp: new Date().toISOString(),
+            };
+            return await this.uploadLogFile(consolidatedLog, workflowRunId, workflowName);
+        }
+        catch (error) {
+            core.error(`Failed to create consolidated log: ${error}`);
+            throw new Error(`Consolidated log creation failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    /**
+     * Get current bucket name
+     */
+    getBucket() {
+        if (!this.credentials) {
+            throw new Error('No credentials available - please initialize S3 client first');
+        }
+        return this.credentials.bucket;
+    }
+}
+exports.S3Uploader = S3Uploader;
+//# sourceMappingURL=s3-uploader.js.map
+
+/***/ }),
+
 /***/ 4914:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -16488,7 +18050,7 @@ exports.getRuntimeConfig = getRuntimeConfig;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const tslib_1 = __nccwpck_require__(1860);
 tslib_1.__exportStar(__nccwpck_require__(5152), exports);
-tslib_1.__exportStar(__nccwpck_require__(7523), exports);
+tslib_1.__exportStar(__nccwpck_require__(9904), exports);
 tslib_1.__exportStar(__nccwpck_require__(7288), exports);
 
 
@@ -16575,7 +18137,7 @@ __name(setFeature, "setFeature");
 
 /***/ }),
 
-/***/ 7523:
+/***/ 9904:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
@@ -72913,1553 +74475,6 @@ function wrappy (fn, cb) {
 
 /***/ }),
 
-/***/ 2193:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.AuthClient = void 0;
-const core = __importStar(__nccwpck_require__(7484));
-const axios_1 = __importDefault(__nccwpck_require__(7269));
-/**
- * Simple in-memory token storage implementation
- */
-class MemoryTokenStorage {
-    token = null;
-    expiry = null;
-    getToken() {
-        if (!this.token) {
-            return null;
-        }
-        // Check if token is expired
-        if (this.expiry && new Date() > this.expiry) {
-            this.clearToken();
-            return null;
-        }
-        return this.token;
-    }
-    setToken(token) {
-        this.token = token;
-        // Set expiry to 1 hour from now if not specified
-        this.expiry = new Date(Date.now() + 60 * 60 * 1000);
-    }
-    clearToken() {
-        this.token = null;
-        this.expiry = null;
-    }
-    isTokenValid() {
-        return this.getToken() !== null;
-    }
-}
-/**
- * HTTP client wrapper with retry logic
- */
-class HttpClientWithRetry {
-    retryOptions;
-    constructor(retryOptions) {
-        this.retryOptions = retryOptions;
-    }
-    async get(url, config) {
-        return this.executeWithRetry(() => axios_1.default.get(url, config));
-    }
-    async post(url, data, config) {
-        return this.executeWithRetry(() => axios_1.default.post(url, data, config));
-    }
-    async put(url, data, config) {
-        return this.executeWithRetry(() => axios_1.default.put(url, data, config));
-    }
-    async delete(url, config) {
-        return this.executeWithRetry(() => axios_1.default.delete(url, config));
-    }
-    async executeWithRetry(operation) {
-        let lastError;
-        let delay = this.retryOptions.initialDelay;
-        for (let attempt = 1; attempt <= this.retryOptions.maxAttempts; attempt++) {
-            try {
-                const response = await operation();
-                return response.data;
-            }
-            catch (error) {
-                lastError = error;
-                if (attempt === this.retryOptions.maxAttempts) {
-                    break;
-                }
-                // Check if error is retryable
-                if (axios_1.default.isAxiosError(error)) {
-                    const status = error.response?.status || 0;
-                    // Don't retry on client errors (4xx) except for 429 (rate limit)
-                    if (status >= 400 && status < 500 && status !== 429) {
-                        break;
-                    }
-                }
-                core.warning(`Attempt ${attempt} failed, retrying in ${delay}ms...`);
-                await this.sleep(delay);
-                delay = Math.min(delay * this.retryOptions.backoffFactor, this.retryOptions.maxDelay);
-            }
-        }
-        throw lastError;
-    }
-    sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-}
-/**
- * Authentication client following SOLID principles
- */
-class AuthClient {
-    baseUrl;
-    tokenStorage;
-    httpClient;
-    userInfo = null;
-    constructor(baseUrl, tokenStorage, httpClient, retryOptions) {
-        // Ensure baseUrl ends with /api if not already included
-        this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-        if (!this.baseUrl.includes('/api')) {
-            this.baseUrl += '/api';
-        }
-        this.tokenStorage = tokenStorage || new MemoryTokenStorage();
-        this.httpClient =
-            httpClient ||
-                new HttpClientWithRetry(retryOptions || {
-                    maxAttempts: 3,
-                    initialDelay: 1000,
-                    maxDelay: 5000,
-                    backoffFactor: 2,
-                });
-    }
-    /**
-     * Login with username and password to get authentication token
-     */
-    async login(username, password) {
-        try {
-            core.info('🔐 Attempting to authenticate with API...');
-            const loginRequest = {
-                username,
-                password,
-            };
-            const response = await this.httpClient.post(`${this.baseUrl}/auth/login`, loginRequest, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'GitHub-Action-Secure-Log-Uploader/1.0',
-                },
-                timeout: 30000, // 30 second timeout for auth
-            });
-            // Validate response structure
-            if (!response.token || !response.username) {
-                throw new Error('Invalid authentication response: missing token or username');
-            }
-            // Store authentication data
-            this.tokenStorage.setToken(response.token);
-            this.userInfo = {
-                username: response.username,
-                roles: response.roles || [],
-            };
-            core.info(`✅ Successfully authenticated as: ${response.username}`);
-            if (response.roles && response.roles.length > 0) {
-                core.info(`🏷️  Roles: ${response.roles.join(', ')}`);
-            }
-            return response;
-        }
-        catch (error) {
-            return this.handleAuthError(error, 'login');
-        }
-    }
-    /**
-     * Get the current authentication token
-     */
-    getToken() {
-        return this.tokenStorage.getToken();
-    }
-    /**
-     * Get current user information
-     */
-    getUserInfo() {
-        return this.userInfo;
-    }
-    /**
-     * Check if currently authenticated
-     */
-    isAuthenticated() {
-        return this.tokenStorage.isTokenValid();
-    }
-    /**
-     * Get authentication headers for API requests
-     */
-    getAuthHeaders() {
-        const token = this.getToken();
-        if (!token) {
-            throw new Error('No valid authentication token available');
-        }
-        return {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'GitHub-Action-Secure-Log-Uploader/1.0',
-        };
-    }
-    /**
-     * Clear authentication data (logout)
-     */
-    logout() {
-        this.tokenStorage.clearToken();
-        this.userInfo = null;
-        core.info('🔓 Logged out successfully');
-    }
-    /**
-     * Test the authentication token with a simple API call
-     */
-    async validateToken() {
-        try {
-            if (!this.isAuthenticated()) {
-                return false;
-            }
-            // Make a simple request to validate token - using the cloud credentials endpoint
-            // as it's the next step in the flow and will validate the token
-            await this.httpClient.get(`${this.baseUrl}/upload/cloud/credentials`, {
-                headers: this.getAuthHeaders(),
-                timeout: 10000,
-            });
-            return true;
-        }
-        catch (error) {
-            if (axios_1.default.isAxiosError(error) && error.response?.status === 401) {
-                // Token is invalid, clear it
-                this.logout();
-            }
-            core.warning('⚠️  Token validation failed');
-            return false;
-        }
-    }
-    /**
-     * Handle authentication errors with detailed messaging
-     */
-    handleAuthError(error, operation) {
-        let errorMessage = `Authentication ${operation} failed`;
-        let statusCode = 0;
-        if (axios_1.default.isAxiosError(error)) {
-            const axiosError = error;
-            statusCode = axiosError.response?.status || 0;
-            if (axiosError.response?.data) {
-                const errorData = axiosError.response.data;
-                errorMessage = errorData.message || errorData.error || errorMessage;
-            }
-            else if (axiosError.message) {
-                errorMessage = axiosError.message;
-            }
-            // Handle specific HTTP status codes
-            switch (statusCode) {
-                case 401:
-                    core.error('🔐 Authentication failed: Invalid username or password');
-                    break;
-                case 403:
-                    core.error('🚫 Access forbidden: User may not have required permissions');
-                    break;
-                case 404:
-                    core.error('🔍 Authentication endpoint not found: Please check the API URL');
-                    break;
-                case 429:
-                    core.error('⏱️  Rate limit exceeded: Too many login attempts');
-                    break;
-                case 500:
-                    core.error('🔥 Server error: API is experiencing issues');
-                    break;
-                default:
-                    core.error(`❌ HTTP ${statusCode}: ${errorMessage}`);
-            }
-        }
-        else if (error instanceof Error) {
-            errorMessage = error.message;
-            core.error(`❌ ${errorMessage}`);
-        }
-        else {
-            core.error(`❌ Unknown error during ${operation}: ${String(error)}`);
-        }
-        throw new Error(errorMessage);
-    }
-}
-exports.AuthClient = AuthClient;
-
-
-/***/ }),
-
-/***/ 5002:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.CredentialsClient = void 0;
-const core = __importStar(__nccwpck_require__(7484));
-/**
- * Client for fetching cloud credentials from the API
- * Follows Single Responsibility Principle by handling only credential fetching
- */
-class CredentialsClient {
-    baseUrl;
-    authClient;
-    httpClient;
-    constructor(baseUrl, authClient, httpClient) {
-        // Ensure baseUrl ends with /api if not already included
-        this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-        if (!this.baseUrl.includes('/api')) {
-            this.baseUrl += '/api';
-        }
-        this.authClient = authClient;
-        this.httpClient = httpClient;
-    }
-    /**
-     * Fetch temporary AWS S3 credentials from the API
-     * @returns Promise<CloudCredentialsResponse> - The cloud credentials response
-     * @throws Error if authentication fails or API call fails
-     */
-    async getCloudCredentials() {
-        try {
-            core.info('☁️  Fetching temporary AWS S3 credentials...');
-            // Ensure we have a valid token
-            if (!this.authClient.isAuthenticated()) {
-                throw new Error('Not authenticated - please login first');
-            }
-            const response = await this.httpClient.get(`${this.baseUrl}/upload/cloud/credentials`, {
-                headers: this.authClient.getAuthHeaders(),
-                timeout: 30000, // 30 second timeout
-            });
-            // Validate response structure
-            if (!response.accessKeyId || !response.secretAccessKey || !response.bucket) {
-                core.warning(`Received credentials response but required fields are missing. Response keys: ${Object.keys(response).join(', ')}`);
-                // If running under act, provide mock credentials so the flow can continue
-                if (process.env.ACT === 'true') {
-                    core.warning('act environment detected – using mock S3 credentials');
-                    return {
-                        accessKeyId: '', // empty for public bucket test
-                        secretAccessKey: '',
-                        sessionToken: '',
-                        expiration: new Date(Date.now() + 3600 * 1000).toISOString(),
-                        bucket: 'mock-bucket',
-                    };
-                }
-                throw new Error('Invalid credentials response: missing required fields');
-            }
-            // Log success (without sensitive data)
-            core.info('✅ Successfully fetched cloud credentials');
-            core.info(`🪣 S3 Bucket: ${response.bucket}`);
-            if (response.expiration) {
-                const expirationDate = new Date(response.expiration);
-                const now = new Date();
-                const hoursUntilExpiration = Math.round((expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60));
-                core.info(`⏰ Credentials expire in ${hoursUntilExpiration} hours`);
-            }
-            return response;
-        }
-        catch (error) {
-            return this.handleCredentialsError(error);
-        }
-    }
-    /**
-     * Check if the provided credentials are still valid
-     * @param credentials - The credentials to validate
-     * @returns boolean - Whether the credentials are still valid
-     */
-    areCredentialsValid(credentials) {
-        if (!credentials.expiration) {
-            // If no expiration is provided, assume they're valid for now
-            return true;
-        }
-        const expirationDate = new Date(credentials.expiration);
-        const now = new Date();
-        // Add a 5-minute buffer to account for clock skew and processing time
-        const bufferTime = 5 * 60 * 1000; // 5 minutes in milliseconds
-        const effectiveExpiration = new Date(expirationDate.getTime() - bufferTime);
-        return now < effectiveExpiration;
-    }
-    /**
-     * Get fresh credentials if current ones are expired or about to expire
-     * @param currentCredentials - Current credentials to check
-     * @returns Promise<CloudCredentialsResponse> - Fresh credentials
-     */
-    async refreshCredentialsIfNeeded(currentCredentials) {
-        if (!currentCredentials || !this.areCredentialsValid(currentCredentials)) {
-            core.info('🔄 Refreshing expired or missing credentials...');
-            return this.getCloudCredentials();
-        }
-        core.info('✅ Current credentials are still valid');
-        return currentCredentials;
-    }
-    /**
-     * Handle credentials-related errors with detailed messaging
-     * @param error - The error to handle
-     * @throws Error - Always throws with appropriate error message
-     */
-    handleCredentialsError(error) {
-        let errorMessage = 'Failed to fetch cloud credentials';
-        if (error instanceof Error) {
-            errorMessage = error.message;
-        }
-        // Check for specific error conditions
-        if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
-            core.error('🔐 Authentication failed: Token may be expired or invalid');
-            core.error('💡 Try re-running the action to get a fresh token');
-        }
-        else if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
-            core.error('🚫 Access forbidden: User may not have permission to access cloud credentials');
-            core.error('💡 Check if your user account has the required roles');
-        }
-        else if (errorMessage.includes('404') || errorMessage.includes('Not Found')) {
-            core.error('🔍 Credentials endpoint not found: Please check the API URL');
-        }
-        else if (errorMessage.includes('429') || errorMessage.includes('Rate limit')) {
-            core.error('⏱️  Rate limit exceeded: Too many requests to the credentials endpoint');
-            core.error('💡 Wait a moment before retrying');
-        }
-        else if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
-            core.error('🔥 Server error: API is experiencing issues');
-            core.error('💡 Try again later or contact support');
-        }
-        else {
-            core.error(`❌ ${errorMessage}`);
-        }
-        throw new Error(errorMessage);
-    }
-}
-exports.CredentialsClient = CredentialsClient;
-
-
-/***/ }),
-
-/***/ 7890:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.GitHubClient = void 0;
-const core = __importStar(__nccwpck_require__(7484));
-const github_1 = __nccwpck_require__(3228);
-class GitHubClient {
-    octokit;
-    owner;
-    repo;
-    constructor(token) {
-        this.octokit = (0, github_1.getOctokit)(token);
-        // Get repository info from environment
-        const repository = process.env.GITHUB_REPOSITORY;
-        if (!repository) {
-            throw new Error('GITHUB_REPOSITORY environment variable not found');
-        }
-        const parts = repository.split('/');
-        if (parts.length !== 2) {
-            throw new Error(`Invalid repository format: ${repository}`);
-        }
-        this.owner = parts[0];
-        this.repo = parts[1];
-    }
-    /**
-     * Get workflow run by ID or current run
-     */
-    async getWorkflowRun(runId) {
-        try {
-            const currentRunId = runId || process.env.GITHUB_RUN_ID;
-            if (!currentRunId) {
-                throw new Error('No workflow run ID provided and GITHUB_RUN_ID not found');
-            }
-            core.info(`Fetching workflow run: ${currentRunId}`);
-            const { data: run } = await this.octokit.rest.actions.getWorkflowRun({
-                owner: this.owner,
-                repo: this.repo,
-                run_id: parseInt(currentRunId, 10),
-            });
-            return {
-                id: run.id,
-                name: run.name || 'Unknown Workflow',
-                status: run.status || null,
-                conclusion: run.conclusion,
-                created_at: run.created_at,
-                updated_at: run.updated_at,
-                html_url: run.html_url,
-                repository: {
-                    full_name: `${this.owner}/${this.repo}`,
-                    html_url: `https://github.com/${this.owner}/${this.repo}`,
-                },
-            };
-        }
-        catch (error) {
-            // When running locally with `act` there may be no real run ID – fall back to a mock.
-            if (process.env.ACT === 'true') {
-                core.warning('act environment detected – returning mock workflow run');
-                const now = new Date().toISOString();
-                return {
-                    id: 0,
-                    name: 'local-act-run',
-                    status: 'completed',
-                    conclusion: 'success',
-                    created_at: now,
-                    updated_at: now,
-                    html_url: '',
-                    repository: {
-                        full_name: `${this.owner}/${this.repo}`,
-                        html_url: `https://github.com/${this.owner}/${this.repo}`,
-                    },
-                };
-            }
-            core.error(`Failed to fetch workflow run: ${error}`);
-            throw new Error(`Failed to fetch workflow run: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-    /**
-     * Get all jobs for a workflow run
-     */
-    async getWorkflowJobs(runId) {
-        try {
-            core.info(`Fetching jobs for workflow run: ${runId}`);
-            const { data } = await this.octokit.rest.actions.listJobsForWorkflowRun({
-                owner: this.owner,
-                repo: this.repo,
-                run_id: runId,
-            });
-            return data.jobs.map(job => ({
-                id: job.id,
-                name: job.name,
-                status: job.status,
-                conclusion: job.conclusion,
-                started_at: job.started_at,
-                completed_at: job.completed_at,
-                html_url: job.html_url || null,
-            }));
-        }
-        catch (error) {
-            core.error(`Failed to fetch workflow jobs: ${error}`);
-            throw new Error(`Failed to fetch workflow jobs: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-    /**
-     * Download logs for a specific job
-     */
-    async getJobLogs(jobId, jobName) {
-        try {
-            core.info(`Downloading logs for job: ${jobName} (${jobId})`);
-            const response = await this.octokit.rest.actions.downloadJobLogsForWorkflowRun({
-                owner: this.owner,
-                repo: this.repo,
-                job_id: jobId,
-            });
-            // The response is a redirect URL to the actual logs
-            const logsResponse = await fetch(response.url);
-            if (!logsResponse.ok) {
-                throw new Error(`Failed to download logs: ${logsResponse.statusText}`);
-            }
-            const logContent = await logsResponse.text();
-            return {
-                jobName,
-                jobId,
-                content: logContent,
-                timestamp: new Date().toISOString(),
-            };
-        }
-        catch (error) {
-            core.warning(`Failed to download logs for job ${jobName}: ${error}`);
-            // Return empty content instead of failing completely
-            return {
-                jobName,
-                jobId,
-                content: `Failed to download logs: ${error instanceof Error ? error.message : String(error)}`,
-                timestamp: new Date().toISOString(),
-            };
-        }
-    }
-    /**
-     * Download logs for all jobs in a workflow run
-     */
-    async getAllWorkflowLogs(runId) {
-        try {
-            // Shortcut for act – create a single mock log and return.
-            if (process.env.ACT === 'true') {
-                core.warning('act environment detected – returning mock workflow logs');
-                return [
-                    {
-                        jobName: 'local-act-job',
-                        jobId: 0,
-                        content: 'This is a mock log generated during an act run.',
-                        timestamp: new Date().toISOString(),
-                    },
-                ];
-            }
-            const jobs = await this.getWorkflowJobs(runId);
-            core.info(`Found ${jobs.length} jobs to download logs for`);
-            const logPromises = jobs.map(job => this.getJobLogs(job.id, job.name));
-            const logs = await Promise.all(logPromises);
-            const successfulLogs = logs.filter(log => !log.content.startsWith('Failed to download logs'));
-            core.info(`Successfully downloaded logs for ${successfulLogs.length}/${jobs.length} jobs`);
-            return logs;
-        }
-        catch (error) {
-            core.error(`Failed to download workflow logs: ${error}`);
-            throw new Error(`Failed to download workflow logs: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-}
-exports.GitHubClient = GitHubClient;
-
-
-/***/ }),
-
-/***/ 9407:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-const core = __importStar(__nccwpck_require__(7484));
-const axios_1 = __importDefault(__nccwpck_require__(7269));
-const auth_client_1 = __nccwpck_require__(2193);
-const credentials_client_1 = __nccwpck_require__(5002);
-const github_client_1 = __nccwpck_require__(7890);
-const notification_client_1 = __nccwpck_require__(5514);
-const s3_uploader_1 = __nccwpck_require__(3780);
-const DEFAULT_API_BASE_URL = 'https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev/api';
-/**
- * Parse action inputs from environment variables
- */
-function getActionInputs() {
-    return {
-        username: core.getInput('username', { required: true }),
-        password: core.getInput('password', { required: true }),
-        apiEndpoint: core.getInput('api-endpoint', { required: false }) || DEFAULT_API_BASE_URL,
-        githubToken: core.getInput('github-token', { required: true }),
-        workflowRunId: core.getInput('workflow-run-id') || undefined,
-        retryAttempts: parseInt(core.getInput('retry-attempts') || '3', 10),
-        retryDelay: parseInt(core.getInput('retry-delay') || '2', 10),
-    };
-}
-/**
- * Set action outputs
- */
-function setActionOutputs(outputs) {
-    core.setOutput('s3-url', outputs.s3Url);
-    core.setOutput('upload-status', outputs.uploadStatus);
-    core.setOutput('files-uploaded', outputs.filesUploaded.toString());
-    core.setOutput('auth-status', outputs.authStatus);
-    core.setOutput('user-info', outputs.userInfo);
-    core.setOutput('notification-status', outputs.notificationStatus);
-}
-/**
- * Generic helper to print a boxed section with a title and content lines
- */
-function printBox(title, lines) {
-    const allLines = [title, ...lines];
-    const boxWidth = Math.max(60, ...allLines.map(l => l.length + 2) // extra padding
-    );
-    const horizontal = '═'.repeat(boxWidth);
-    const pad = (text) => {
-        return text.padEnd(boxWidth, ' ');
-    };
-    const titlePadLeft = Math.floor((boxWidth - title.length) / 2);
-    const titleLine = ' '.repeat(titlePadLeft) + title + ' '.repeat(boxWidth - title.length - titlePadLeft);
-    core.info(`╔${horizontal}╗`);
-    core.info(`║${titleLine}║`);
-    core.info(`╠${horizontal}╣`);
-    lines.forEach(l => {
-        core.info(`║${pad(l)}║`);
-    });
-    core.info(`╚${horizontal}╝`);
-}
-/**
- * Print analysis link in logs and job summary, and set as output
- */
-async function displayAnalysisLink(link) {
-    core.startGroup('🔗 HycosAI Analysis');
-    printBox(' HycosAI Analysis ', [`👉  ${link}`]);
-    core.endGroup();
-    // Job summary section
-    try {
-        await core.summary
-            .addHeading('HycosAI Analysis')
-            .addLink('Open in HycosAI', link)
-            .addEOL()
-            .write();
-    }
-    catch (err) {
-        core.debug(`Failed to write summary: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    // Output variable
-    core.setOutput('analysis-url', link);
-}
-/**
- * Collect and display useful build metadata from GitHub environment variables and the workflowRun object
- */
-async function displayBuildMetadata(workflowRun) {
-    const env = process.env;
-    const metadata = {
-        Repository: workflowRun.repository.full_name,
-        Workflow: workflowRun.name,
-        'Run ID': workflowRun.id.toString(),
-        'Run Number': env.GITHUB_RUN_NUMBER,
-        'Run Attempt': env.GITHUB_RUN_ATTEMPT,
-        'Commit SHA': env.GITHUB_SHA,
-        Ref: env.GITHUB_REF,
-        Branch: env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME,
-        Actor: env.GITHUB_ACTOR,
-        Event: env.GITHUB_EVENT_NAME,
-        Job: env.GITHUB_JOB,
-    };
-    // Prepare formatted lines and print inside a box
-    const metaLines = Object.entries(metadata)
-        .filter(([, v]) => v)
-        .map(([k, v]) => `${k}: ${v}`);
-    core.startGroup('📦 Build Metadata');
-    printBox(' Build Metadata ', metaLines);
-    core.endGroup();
-    // Add to job summary
-    try {
-        const tableRows = Object.entries(metadata)
-            .filter(([, v]) => v)
-            .map(([k, v]) => [k, v]);
-        await core.summary.addHeading('Build Metadata').addTable(tableRows).addEOL().write();
-    }
-    catch (err) {
-        core.debug(`Failed to write build metadata summary: ${err instanceof Error ? err.message : String(err)}`);
-    }
-}
-/**
- * Main action execution following the specified flow
- */
-async function run() {
-    let authStatus = 'failed';
-    let userInfo = '';
-    let uploadStatus = 'failed';
-    let filesUploaded = 0;
-    let notificationStatus = 'failed';
-    let s3Url = '';
-    try {
-        core.info('🚀 Starting Secure Build Log Uploader Action');
-        // Step 1: Parse and validate inputs
-        const inputs = getActionInputs();
-        core.info('✅ Action inputs validated');
-        // Step 2: Setup retry options
-        const retryOptions = {
-            maxAttempts: inputs.retryAttempts,
-            initialDelay: inputs.retryDelay * 1000, // Convert to milliseconds
-            maxDelay: 30000, // 30 seconds max delay
-            backoffFactor: 2,
-        };
-        // Step 3: Initialize HTTP client wrapper
-        const httpClient = {
-            get: async (url, config) => {
-                const response = await axios_1.default.get(url, config);
-                return response.data;
-            },
-            post: async (url, data, config) => {
-                const response = await axios_1.default.post(url, data, config);
-                return response.data;
-            },
-            put: async (url, data, config) => {
-                const response = await axios_1.default.put(url, data, config);
-                return response.data;
-            },
-            delete: async (url, config) => {
-                const response = await axios_1.default.delete(url, config);
-                return response.data;
-            },
-        };
-        // Step 4: Authenticate with the API
-        core.startGroup('🔐 Authenticating with API');
-        const authClient = new auth_client_1.AuthClient(inputs.apiEndpoint, undefined, httpClient, retryOptions);
-        const authResponse = await authClient.login(inputs.username, inputs.password);
-        authStatus = 'success';
-        userInfo = JSON.stringify({
-            username: authResponse.username,
-            roles: authResponse.roles,
-            type: authResponse.type,
-        });
-        // Log full auth request path and mock status code for visibility
-        const authRequestUrl = `${inputs.apiEndpoint.replace(/\/?$/, '')}/api/auth/login`;
-        core.info(`🛰️  Auth request URL: ${authRequestUrl} – response status 200`);
-        core.info(`✅ Successfully authenticated as: ${authResponse.username}`);
-        core.endGroup();
-        // Step 5: Initialize GitHub client
-        core.startGroup('🐙 Initializing GitHub client');
-        const githubClient = new github_client_1.GitHubClient(inputs.githubToken);
-        core.info('✅ GitHub client initialized');
-        core.endGroup();
-        // Step 6: Get workflow information
-        core.startGroup('📋 Fetching workflow information');
-        const workflowRun = await githubClient.getWorkflowRun(inputs.workflowRunId);
-        core.info(`Workflow: ${workflowRun.name}`);
-        core.info(`Run ID: ${workflowRun.id}`);
-        core.info(`Status: ${workflowRun.status || 'Unknown'}`);
-        core.info(`Conclusion: ${workflowRun.conclusion || 'N/A'}`);
-        core.endGroup();
-        // Check if we're in act environment for testing
-        const isActEnvironment = process.env.ACT === 'true';
-        // Exit early if the run was successful or neutral (unless in act environment for testing)
-        const nonFailureConclusions = ['success', 'neutral', 'skipped'];
-        if (!isActEnvironment && (!workflowRun.conclusion || nonFailureConclusions.includes(workflowRun.conclusion))) {
-            core.info('🏁 Workflow concluded without failures – skipping log upload.');
-            setActionOutputs({
-                s3Url: '',
-                uploadStatus: 'skipped',
-                filesUploaded: 0,
-                authStatus,
-                userInfo,
-                notificationStatus: 'skipped',
-            });
-            return;
-        }
-        if (isActEnvironment) {
-            core.info('🧪 Act environment detected – proceeding with full flow for testing');
-        }
-        // Display extra metadata (will include env vars only present on real GitHub runners)
-        await displayBuildMetadata(workflowRun);
-        // Step 7: Download GitHub logs
-        core.startGroup('📥 Downloading build logs');
-        const logs = await githubClient.getAllWorkflowLogs(workflowRun.id);
-        if (logs.length === 0) {
-            core.warning('No logs found for this workflow run');
-            setActionOutputs({
-                s3Url: '',
-                uploadStatus: 'failed',
-                filesUploaded: 0,
-                authStatus,
-                userInfo,
-                notificationStatus: 'not-attempted',
-            });
-            return;
-        }
-        core.info(`📄 Downloaded ${logs.length} log files`);
-        const totalLogSize = logs.reduce((sum, log) => sum + log.content.length, 0);
-        core.info(`📊 Total log size: ${(totalLogSize / 1024 / 1024).toFixed(2)} MB`);
-        core.endGroup();
-        // Step 8: Initialize credentials client and S3 uploader
-        core.startGroup('☁️ Setting up S3 upload');
-        const credentialsClient = new credentials_client_1.CredentialsClient(inputs.apiEndpoint, authClient, httpClient);
-        const s3Uploader = new s3_uploader_1.S3Uploader(credentialsClient, retryOptions);
-        core.info('✅ S3 uploader initialized');
-        core.endGroup();
-        // Step 9: Upload logs to S3
-        core.startGroup('📤 Uploading logs to S3');
-        const uploadResults = await s3Uploader.uploadAllLogs(logs, workflowRun.id, workflowRun.name);
-        if (uploadResults.length === 0) {
-            throw new Error('Failed to upload any logs to S3');
-        }
-        // Also create a consolidated log file
-        const consolidatedResult = await s3Uploader.uploadConsolidatedLogs(logs, workflowRun.id, workflowRun.name);
-        uploadResults.push(consolidatedResult);
-        uploadStatus = 'success';
-        filesUploaded = uploadResults.length;
-        s3Url = uploadResults[0]?.location || '';
-        core.info(`✅ Successfully uploaded ${uploadResults.length} files to S3`);
-        core.info(`📍 Primary S3 URL: ${s3Url}`);
-        core.endGroup();
-        // Step 10: Notify API about successful upload
-        core.startGroup('📢 Notifying API about upload completion');
-        const notificationClient = new notification_client_1.NotificationClient(inputs.apiEndpoint, authClient, httpClient);
-        await notificationClient.notifyUploadComplete(uploadResults, workflowRun, s3Uploader.getBucket());
-        notificationStatus = 'success';
-        core.info('✅ Successfully notified API about upload completion');
-        core.endGroup();
-        // 🔗 Generate and display the analysis UI link
-        const shortAnalysisId = Math.random().toString(36).substring(2, 8);
-        const uiBaseUrl = inputs.apiEndpoint.replace(/\/api\/?$/, '');
-        const analysisLink = `${uiBaseUrl}/analysis/${shortAnalysisId}`;
-        await displayAnalysisLink(analysisLink);
-        // Step 11: Set success outputs
-        setActionOutputs({
-            s3Url,
-            uploadStatus,
-            filesUploaded,
-            authStatus,
-            userInfo,
-            notificationStatus,
-        });
-        core.info('🎉 Secure Build Log Uploader completed successfully!');
-        core.info(`📊 Summary: ${filesUploaded} files uploaded and API notified`);
-    }
-    catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        core.setFailed(`Action failed: ${errorMessage}`);
-        // Set failure outputs
-        setActionOutputs({
-            s3Url,
-            uploadStatus,
-            filesUploaded,
-            authStatus,
-            userInfo,
-            notificationStatus,
-        });
-        // Log error details for debugging
-        core.error(`❌ Action failed with error: ${errorMessage}`);
-        if (error instanceof Error && error.stack) {
-            core.debug(`Error stack: ${error.stack}`);
-        }
-        // Provide helpful troubleshooting information
-        core.startGroup('🔍 Troubleshooting Information');
-        core.info('Please check the following:');
-        core.info('• API endpoint is correct and accessible');
-        core.info('• Username and password are valid');
-        core.info('• GitHub token has necessary permissions');
-        core.info('• Network connectivity is stable');
-        core.info('• API service is operational');
-        core.endGroup();
-        throw error;
-    }
-}
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-    core.error(`Unhandled promise rejection at: ${promise}, reason: ${reason}`);
-    process.exit(1);
-});
-// Handle uncaught exceptions
-process.on('uncaughtException', error => {
-    core.error(`Uncaught exception: ${error.message}`);
-    if (error.stack) {
-        core.debug(`Exception stack: ${error.stack}`);
-    }
-    process.exit(1);
-});
-// Run the action
-if (require.main === require.cache[eval('__filename')]) {
-    run().catch(error => {
-        core.setFailed(`Action execution failed: ${error.message}`);
-        process.exit(1);
-    });
-}
-
-
-/***/ }),
-
-/***/ 5514:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.NotificationClient = void 0;
-const core = __importStar(__nccwpck_require__(7484));
-/**
- * Client for notifying the API after successful upload
- * Follows Single Responsibility Principle by handling only upload notifications
- */
-class NotificationClient {
-    baseUrl;
-    authClient;
-    httpClient;
-    constructor(baseUrl, authClient, httpClient) {
-        // Ensure baseUrl ends with /api if not already included
-        this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-        if (!this.baseUrl.includes('/api')) {
-            this.baseUrl += '/api';
-        }
-        this.authClient = authClient;
-        this.httpClient = httpClient;
-    }
-    /**
-     * Notify the API about successful upload completion
-     * @param uploadResults - Array of S3 upload results
-     * @param workflowRun - GitHub workflow run information
-     * @param bucketName - S3 bucket name where files were uploaded
-     * @returns Promise<void>
-     * @throws Error if notification fails
-     */
-    async notifyUploadComplete(uploadResults, workflowRun, bucketName) {
-        try {
-            core.info('📢 Notifying API about successful upload completion...');
-            // Ensure we have a valid token
-            if (!this.authClient.isAuthenticated()) {
-                throw new Error('Not authenticated - please login first');
-            }
-            if (uploadResults.length === 0) {
-                core.warning('No upload results to notify about');
-                return;
-            }
-            // Prepare notification payload
-            const notificationPayload = this.buildNotificationPayload(uploadResults, workflowRun, bucketName);
-            // Make API call to notify about upload completion
-            await this.httpClient.post(`${this.baseUrl}/upload/uploaded`, notificationPayload, {
-                headers: this.authClient.getAuthHeaders(),
-                timeout: 30000, // 30 second timeout
-            });
-            core.info('✅ Successfully notified API about upload completion');
-            core.info(`📁 Notified about ${uploadResults.length} uploaded files`);
-        }
-        catch (error) {
-            return this.handleNotificationError(error);
-        }
-    }
-    /**
-     * Build the notification payload from upload results and workflow information
-     * @param uploadResults - Array of S3 upload results
-     * @param workflowRun - GitHub workflow run information
-     * @param bucketName - S3 bucket name
-     * @returns UploadNotificationRequest
-     */
-    buildNotificationPayload(uploadResults, workflowRun, bucketName) {
-        // Convert S3 upload results to uploaded files
-        const files = uploadResults.map(result => ({
-            filename: this.extractFilenameFromKey(result.key),
-            fileType: 'LOG',
-            bucketName: bucketName,
-        }));
-        // Build details from workflow run
-        const buildDetails = {
-            folder: this.generateBuildFolder(workflowRun),
-            jobName: workflowRun.name,
-            buildNumber: workflowRun.id,
-        };
-        // Server details from repository information
-        const serverDetails = {
-            serverAddress: 'testAddress',
-            // serverAddress: workflowRun.repository?.html_url || workflowRun.html_url,
-        };
-        return {
-            files,
-            buildDetails,
-            serverDetails,
-        };
-    }
-    /**
-     * Extract filename from S3 key
-     * @param key - S3 object key
-     * @returns filename
-     */
-    extractFilenameFromKey(key) {
-        const parts = key.split('/');
-        return parts[parts.length - 1] || key;
-    }
-    /**
-     * Generate build folder name from workflow run
-     * @param workflowRun - GitHub workflow run information
-     * @returns folder name
-     */
-    generateBuildFolder(workflowRun) {
-        const date = new Date(workflowRun.created_at).toISOString().split('T')[0];
-        const repoName = workflowRun.repository?.full_name || 'unknown-repo';
-        return `${repoName}/${date}/${workflowRun.id}`;
-    }
-    /**
-     * Notify about specific files with custom build details
-     * @param files - Array of uploaded files
-     * @param buildDetails - Custom build details
-     * @param serverDetails - Server details
-     * @returns Promise<void>
-     */
-    async notifyCustomUpload(files, buildDetails, serverDetails) {
-        try {
-            core.info('📢 Notifying API about custom upload...');
-            // Ensure we have a valid token
-            if (!this.authClient.isAuthenticated()) {
-                throw new Error('Not authenticated - please login first');
-            }
-            if (files.length === 0) {
-                core.warning('No files to notify about');
-                return;
-            }
-            const notificationPayload = {
-                files,
-                buildDetails,
-                serverDetails,
-            };
-            // Make API call
-            await this.httpClient.post(`${this.baseUrl}/upload/uploaded`, notificationPayload, {
-                headers: this.authClient.getAuthHeaders(),
-                timeout: 30000,
-            });
-            core.info('✅ Successfully notified API about custom upload');
-            core.info(`📁 Notified about ${files.length} uploaded files`);
-        }
-        catch (error) {
-            return this.handleNotificationError(error);
-        }
-    }
-    /**
-     * Handle notification errors with detailed messaging
-     * @param error - The error to handle
-     * @throws Error - Always throws with appropriate error message
-     */
-    handleNotificationError(error) {
-        let errorMessage = 'Failed to notify API about upload completion';
-        if (error instanceof Error) {
-            errorMessage = error.message;
-        }
-        // Check for specific error conditions
-        if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
-            core.error('🔐 Authentication failed: Token may be expired or invalid');
-            core.error('💡 Try re-running the action to get a fresh token');
-        }
-        else if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
-            core.error('🚫 Access forbidden: User may not have permission to send notifications');
-            core.error('💡 Check if your user account has the required roles for upload notifications');
-        }
-        else if (errorMessage.includes('404') || errorMessage.includes('Not Found')) {
-            core.error('🔍 Notification endpoint not found: Please check the API URL');
-        }
-        else if (errorMessage.includes('429') || errorMessage.includes('Rate limit')) {
-            core.error('⏱️  Rate limit exceeded: Too many requests to the notification endpoint');
-            core.error('💡 Wait a moment before retrying');
-        }
-        else if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
-            core.error('🔥 Server error: API is experiencing issues');
-            core.error('💡 Try again later or contact support');
-        }
-        else {
-            core.error(`❌ ${errorMessage}`);
-        }
-        // Log detailed information for debugging
-        core.debug(`Notification error details: ${JSON.stringify(error, null, 2)}`);
-        throw new Error(errorMessage);
-    }
-}
-exports.NotificationClient = NotificationClient;
-
-
-/***/ }),
-
-/***/ 3780:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.S3Uploader = void 0;
-const core = __importStar(__nccwpck_require__(7484));
-const client_s3_1 = __nccwpck_require__(3711);
-const lib_storage_1 = __nccwpck_require__(2358);
-/**
- * S3 Uploader with temporary credentials and retry logic
- * Follows SOLID principles with dependency injection
- */
-class S3Uploader {
-    s3Client = null;
-    credentials = null;
-    credentialsClient;
-    retryOptions;
-    constructor(credentialsClient, retryOptions) {
-        this.credentialsClient = credentialsClient;
-        this.retryOptions = retryOptions || {
-            maxAttempts: 3,
-            initialDelay: 1000,
-            maxDelay: 10000,
-            backoffFactor: 2,
-        };
-    }
-    /**
-     * Initialize or refresh S3 client with current credentials
-     */
-    async initializeS3Client() {
-        try {
-            // Get fresh credentials if needed
-            this.credentials = await this.credentialsClient.refreshCredentialsIfNeeded(this.credentials || undefined);
-            this.s3Client = new client_s3_1.S3Client({
-                region: 'us-east-1',
-                credentials: {
-                    accessKeyId: this.credentials.accessKeyId,
-                    secretAccessKey: this.credentials.secretAccessKey,
-                    sessionToken: this.credentials.sessionToken,
-                },
-                maxAttempts: this.retryOptions.maxAttempts,
-                retryMode: 'adaptive',
-            });
-            core.info('✅ S3 client initialized with temporary credentials');
-        }
-        catch (error) {
-            core.error(`Failed to initialize S3 client: ${error}`);
-            throw new Error(`S3 client initialization failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-    /**
-     * Generate S3 key for log file
-     */
-    generateS3Key(workflowRunId, jobName, timestamp) {
-        const date = new Date(timestamp).toISOString().split('T')[0]; // YYYY-MM-DD
-        const sanitizedJobName = jobName.replace(/[^a-zA-Z0-9-_]/g, '_');
-        const timestampSuffix = new Date(timestamp).getTime();
-        return `build-logs/${date}/${workflowRunId}/${sanitizedJobName}_${timestampSuffix}.log`;
-    }
-    /**
-     * Execute operation with retry logic
-     */
-    async executeWithRetry(operation, operationName) {
-        let lastError;
-        let delay = this.retryOptions.initialDelay;
-        for (let attempt = 1; attempt <= this.retryOptions.maxAttempts; attempt++) {
-            try {
-                return await operation();
-            }
-            catch (error) {
-                lastError = error;
-                if (attempt === this.retryOptions.maxAttempts) {
-                    break;
-                }
-                // Check if credentials need refreshing
-                if (this.isCredentialsError(error)) {
-                    core.warning(`Credentials may be expired, refreshing... (attempt ${attempt})`);
-                    await this.initializeS3Client();
-                }
-                core.warning(`${operationName} failed (attempt ${attempt}/${this.retryOptions.maxAttempts}), retrying in ${delay}ms...`);
-                await this.sleep(delay);
-                delay = Math.min(delay * this.retryOptions.backoffFactor, this.retryOptions.maxDelay);
-            }
-        }
-        throw lastError;
-    }
-    /**
-     * Check if error is related to credentials
-     */
-    isCredentialsError(error) {
-        const errorMessage = error?.message || error?.toString() || '';
-        return (errorMessage.includes('InvalidAccessKeyId') ||
-            errorMessage.includes('SignatureDoesNotMatch') ||
-            errorMessage.includes('TokenRefreshRequired') ||
-            errorMessage.includes('ExpiredToken') ||
-            errorMessage.includes('Forbidden'));
-    }
-    /**
-     * Sleep for specified milliseconds
-     */
-    sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-    /**
-     * Upload a single log file to S3
-     */
-    async uploadLogFile(logContent, workflowRunId, workflowName) {
-        return this.executeWithRetry(async () => {
-            // Ensure S3 client is initialized with valid credentials
-            if (!this.s3Client || !this.credentials) {
-                await this.initializeS3Client();
-            }
-            if (!this.s3Client || !this.credentials) {
-                throw new Error('Failed to initialize S3 client');
-            }
-            const s3Key = this.generateS3Key(workflowRunId, logContent.jobName, logContent.timestamp);
-            core.info(`Uploading log for job "${logContent.jobName}" to S3: ${s3Key}`);
-            // Prepare metadata
-            const metadata = {
-                'workflow-run-id': workflowRunId.toString(),
-                'workflow-name': workflowName,
-                'job-name': logContent.jobName,
-                'job-id': logContent.jobId.toString(),
-                'upload-timestamp': new Date().toISOString(),
-            };
-            // Use multipart upload for better reliability with large files
-            const upload = new lib_storage_1.Upload({
-                client: this.s3Client,
-                params: {
-                    Bucket: this.credentials.bucket,
-                    Key: s3Key,
-                    Body: logContent.content,
-                    ContentType: 'text/plain',
-                    Metadata: metadata,
-                    ServerSideEncryption: 'AES256', // Enable server-side encryption
-                    ACL: 'bucket-owner-full-control',
-                },
-                // Configure multipart upload settings
-                queueSize: 4,
-                partSize: 1024 * 1024 * 5, // 5MB parts
-                leavePartsOnError: false,
-            });
-            // Add progress tracking
-            upload.on('httpUploadProgress', progress => {
-                if (progress.total && progress.loaded !== undefined) {
-                    const percentage = Math.round((progress.loaded / progress.total) * 100);
-                    core.info(`Upload progress for ${logContent.jobName}: ${percentage}%`);
-                }
-            });
-            const result = await upload.done();
-            const s3Result = {
-                location: result.Location || `https://${this.credentials.bucket}.s3.amazonaws.com/${s3Key}`,
-                bucket: this.credentials.bucket,
-                key: s3Key,
-                etag: result.ETag || '',
-            };
-            core.info(`✅ Successfully uploaded log for job "${logContent.jobName}"`);
-            return s3Result;
-        }, `Upload log for job "${logContent.jobName}"`);
-    }
-    /**
-     * Upload all logs to S3 with controlled concurrency
-     */
-    async uploadAllLogs(logs, workflowRunId, workflowName) {
-        if (logs.length === 0) {
-            core.warning('No logs to upload');
-            return [];
-        }
-        core.info(`Starting upload of ${logs.length} log files to S3`);
-        try {
-            // Upload logs in parallel with controlled concurrency (max 3 at a time)
-            const concurrencyLimit = 3;
-            const results = [];
-            const errors = [];
-            for (let i = 0; i < logs.length; i += concurrencyLimit) {
-                const batch = logs.slice(i, i + concurrencyLimit);
-                const batchPromises = batch.map(log => this.uploadLogFile(log, workflowRunId, workflowName).catch(error => {
-                    errors.push(`${log.jobName}: ${error.message}`);
-                    return null;
-                }));
-                const batchResults = await Promise.all(batchPromises);
-                results.push(...batchResults.filter(result => result !== null));
-            }
-            if (errors.length > 0) {
-                core.warning(`Failed to upload ${errors.length} log files:`);
-                errors.forEach(error => core.warning(`  - ${error}`));
-            }
-            core.info(`✅ Successfully uploaded ${results.length}/${logs.length} log files to S3`);
-            return results;
-        }
-        catch (error) {
-            core.error(`Batch upload failed: ${error}`);
-            throw new Error(`Batch S3 upload failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-    /**
-     * Create a consolidated log file and upload it
-     */
-    async uploadConsolidatedLogs(logs, workflowRunId, workflowName) {
-        try {
-            core.info('Creating consolidated log file');
-            // Create consolidated log content
-            const consolidatedContent = logs
-                .map(log => {
-                const separator = '='.repeat(80);
-                return [
-                    separator,
-                    `JOB: ${log.jobName} (ID: ${log.jobId})`,
-                    `TIMESTAMP: ${log.timestamp}`,
-                    separator,
-                    log.content,
-                    '', // Empty line for spacing
-                ].join('\n');
-            })
-                .join('\n');
-            const consolidatedLog = {
-                jobName: 'consolidated',
-                jobId: 0,
-                content: consolidatedContent,
-                timestamp: new Date().toISOString(),
-            };
-            return await this.uploadLogFile(consolidatedLog, workflowRunId, workflowName);
-        }
-        catch (error) {
-            core.error(`Failed to create consolidated log: ${error}`);
-            throw new Error(`Consolidated log creation failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-    /**
-     * Get current bucket name
-     */
-    getBucket() {
-        if (!this.credentials) {
-            throw new Error('No credentials available - please initialize S3 client first');
-        }
-        return this.credentials.bucket;
-    }
-}
-exports.S3Uploader = S3Uploader;
-
-
-/***/ }),
-
 /***/ 2613:
 /***/ ((module) => {
 
@@ -81226,7 +81241,7 @@ module.exports = /*#__PURE__*/JSON.parse('{"application/1d-interleaved-parityfec
 /******/ 	// startup
 /******/ 	// Load entry module and return exports
 /******/ 	// This entry module is referenced by other modules so it can't be inlined
-/******/ 	var __webpack_exports__ = __nccwpck_require__(9407);
+/******/ 	var __webpack_exports__ = __nccwpck_require__(137);
 /******/ 	module.exports = __webpack_exports__;
 /******/ 	
 /******/ })()

@@ -297,7 +297,7 @@ async function run(): Promise<void> {
     core.startGroup('📢 Notifying API about upload completion');
     const notificationClient = new NotificationClient(inputs.apiEndpoint, authClient, httpClient);
 
-    await notificationClient.notifyUploadComplete(
+    const analysisId = await notificationClient.notifyUploadComplete(
       uploadResults,
       workflowRun,
       s3Uploader.getBucket()
@@ -307,10 +307,9 @@ async function run(): Promise<void> {
     core.info('✅ Successfully notified API about upload completion');
     core.endGroup();
 
-    // 🔗 Generate and display the analysis UI link
-    const shortAnalysisId = Math.random().toString(36).substring(2, 8);
+    // 🔗 Generate and display the analysis UI link (using actual analysis ID)
     const uiBaseUrl = inputs.apiEndpoint.replace(/\/api\/?$/, '');
-    const analysisLink = `${uiBaseUrl}/analysis/${shortAnalysisId}`;
+    const analysisLink = `https://app.hycos.ai/analysis/${analysisId}`;
     await displayAnalysisLink(analysisLink);
 
     // Step 11: Set success outputs

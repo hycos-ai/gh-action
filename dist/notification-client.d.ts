@@ -14,10 +14,10 @@ export declare class NotificationClient {
      * @param uploadResults - Array of S3 upload results
      * @param workflowRun - GitHub workflow run information
      * @param bucketName - S3 bucket name where files were uploaded
-     * @returns Promise<void>
+     * @returns Promise<string> - Analysis ID for tracking
      * @throws Error if notification fails
      */
-    notifyUploadComplete(uploadResults: S3UploadResult[], workflowRun: WorkflowRun, bucketName: string): Promise<void>;
+    notifyUploadComplete(uploadResults: S3UploadResult[], workflowRun: WorkflowRun, bucketName: string): Promise<string>;
     /**
      * Build the notification payload from upload results and workflow information
      * @param uploadResults - Array of S3 upload results
@@ -43,9 +43,9 @@ export declare class NotificationClient {
      * @param files - Array of uploaded files
      * @param buildDetails - Custom build details
      * @param serverDetails - Server details
-     * @returns Promise<void>
+     * @returns Promise<string> - Analysis ID for tracking
      */
-    notifyCustomUpload(files: UploadedFile[], buildDetails: BuildDetails, serverDetails: ServerDetails): Promise<void>;
+    notifyCustomUpload(files: UploadedFile[], buildDetails: BuildDetails, serverDetails: ServerDetails): Promise<string>;
     /**
      * Handle notification errors with detailed messaging
      * @param error - The error to handle
@@ -53,3 +53,4 @@ export declare class NotificationClient {
      */
     private handleNotificationError;
 }
+//# sourceMappingURL=notification-client.d.ts.map

@@ -47,3 +47,4 @@ export declare class S3Uploader {
      */
     getBucket(): string;
 }
+//# sourceMappingURL=s3-uploader.d.ts.map

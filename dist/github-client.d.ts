@@ -21,3 +21,4 @@ export declare class GitHubClient {
      */
     getAllWorkflowLogs(runId: number): Promise<LogContent[]>;
 }
+//# sourceMappingURL=github-client.d.ts.map

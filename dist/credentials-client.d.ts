@@ -34,3 +34,4 @@ export declare class CredentialsClient {
      */
     private handleCredentialsError;
 }
+//# sourceMappingURL=credentials-client.d.ts.map

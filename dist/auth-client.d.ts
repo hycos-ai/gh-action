@@ -44,3 +44,4 @@ export declare class AuthClient {
      */
     private handleAuthError;
 }
+//# sourceMappingURL=auth-client.d.ts.map

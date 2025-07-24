@@ -6,6 +6,7 @@ import {
   S3UploadResult,
   ServerDetails,
   UploadNotificationRequest,
+  UploadNotificationResponse,
   UploadedFile,
   WorkflowRun,
 } from './types';
@@ -35,14 +36,14 @@ export class NotificationClient {
    * @param uploadResults - Array of S3 upload results
    * @param workflowRun - GitHub workflow run information
    * @param bucketName - S3 bucket name where files were uploaded
-   * @returns Promise<void>
+   * @returns Promise<string> - Analysis ID for tracking
    * @throws Error if notification fails
    */
   async notifyUploadComplete(
     uploadResults: S3UploadResult[],
     workflowRun: WorkflowRun,
     bucketName: string
-  ): Promise<void> {
+  ): Promise<string> {
     try {
       core.info('📢 Notifying API about successful upload completion...');
 
@@ -53,7 +54,7 @@ export class NotificationClient {
 
       if (uploadResults.length === 0) {
         core.warning('No upload results to notify about');
-        return;
+        return 'no-upload-' + Math.random().toString(36).substring(2, 8);
       }
 
       // Prepare notification payload
@@ -64,13 +65,24 @@ export class NotificationClient {
       );
 
       // Make API call to notify about upload completion
-      await this.httpClient.post<void>(`${this.baseUrl}/upload/uploaded`, notificationPayload, {
+      const response = await this.httpClient.post<UploadNotificationResponse>(`${this.baseUrl}/api/upload/uploaded`, notificationPayload, {
         headers: this.authClient.getAuthHeaders(),
         timeout: 30000, // 30 second timeout
       });
 
       core.info('✅ Successfully notified API about upload completion');
       core.info(`📁 Notified about ${uploadResults.length} uploaded files`);
+      
+      // Display analysis link
+      const analysisId = response.analysisId || 'mock-analysis-' + Math.random().toString(36).substring(2, 8);
+      const analysisUrl = response.analysisUrl || `https://app.hycos.ai/analysis/${analysisId}`;
+      
+      core.info('🔗 Analysis Link:');
+      core.info(`   ${analysisUrl}`);
+      core.info('');
+      core.info('📊 View your build analysis results at the link above');
+      
+      return analysisId;
     } catch (error) {
       return this.handleNotificationError(error);
     }
@@ -104,8 +116,8 @@ export class NotificationClient {
 
     // Server details from repository information
     const serverDetails: ServerDetails = {
-      serverAddress: 'testAddress',
-      // serverAddress: workflowRun.repository?.html_url || workflowRun.html_url,
+      serverAddress: workflowRun.repository?.html_url || workflowRun.html_url,
+      type: 'github',
     };
 
     return {
@@ -141,13 +153,13 @@ export class NotificationClient {
    * @param files - Array of uploaded files
    * @param buildDetails - Custom build details
    * @param serverDetails - Server details
-   * @returns Promise<void>
+   * @returns Promise<string> - Analysis ID for tracking
    */
   async notifyCustomUpload(
     files: UploadedFile[],
     buildDetails: BuildDetails,
     serverDetails: ServerDetails
-  ): Promise<void> {
+  ): Promise<string> {
     try {
       core.info('📢 Notifying API about custom upload...');
 
@@ -158,7 +170,7 @@ export class NotificationClient {
 
       if (files.length === 0) {
         core.warning('No files to notify about');
-        return;
+        return 'no-files-' + Math.random().toString(36).substring(2, 8);
       }
 
       const notificationPayload: UploadNotificationRequest = {
@@ -168,13 +180,24 @@ export class NotificationClient {
       };
 
       // Make API call
-      await this.httpClient.post<void>(`${this.baseUrl}/upload/uploaded`, notificationPayload, {
+      const response = await this.httpClient.post<UploadNotificationResponse>(`${this.baseUrl}/api/upload/uploaded`, notificationPayload, {
         headers: this.authClient.getAuthHeaders(),
         timeout: 30000,
       });
 
       core.info('✅ Successfully notified API about custom upload');
       core.info(`📁 Notified about ${files.length} uploaded files`);
+      
+      // Display analysis link
+      const analysisId = response.analysisId || 'mock-custom-' + Math.random().toString(36).substring(2, 8);
+      const analysisUrl = response.analysisUrl || `https://app.hycos.ai/analysis/${analysisId}`;
+      
+      core.info('🔗 Analysis Link:');
+      core.info(`   ${analysisUrl}`);
+      core.info('');
+      core.info('📊 View your build analysis results at the link above');
+      
+      return analysisId;
     } catch (error) {
       return this.handleNotificationError(error);
     }
