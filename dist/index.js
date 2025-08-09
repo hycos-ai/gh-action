@@ -73391,6 +73391,23 @@ async function notifyUploadComplete(apiEndpoint, apiKey, uploadedFiles, buildDet
         });
         // Minimal response logging
         core.info(`📡 Response Status: ${response.status}`);
+        // Full response body logging for debugging
+        core.startGroup('🔍 Upload Notification Full Response');
+        try {
+            const rawData = response.data;
+            const dataType = typeof rawData;
+            core.info(`📡 Response Data Type: ${dataType}`);
+            if (typeof rawData === 'string') {
+                core.info(`📡 Response Body (raw): ${rawData}`);
+            }
+            else {
+                core.info(`📡 Response Body (JSON): ${JSON.stringify(rawData, null, 2)}`);
+            }
+        }
+        catch (logErr) {
+            core.info(`📡 Failed to stringify response body: ${logErr instanceof Error ? logErr.message : String(logErr)}`);
+        }
+        core.endGroup();
         // Check if response has expected structure
         if (typeof response.data === 'object' && response.data !== null) {
             core.info(`📡 Response Properties:`);
