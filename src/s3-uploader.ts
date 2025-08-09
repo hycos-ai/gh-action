@@ -1,7 +1,6 @@
 import * as core from '@actions/core';
 import { S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
-import { CredentialsClient } from './credentials-client';
 import { CloudCredentialsResponse, LogContent, RetryOptions, S3UploadResult } from './types';
 
 /**
@@ -9,60 +8,43 @@ import { CloudCredentialsResponse, LogContent, RetryOptions, S3UploadResult } fr
  * Follows SOLID principles with dependency injection
  */
 export class S3Uploader {
-  private s3Client: S3Client | null = null;
-  private credentials: CloudCredentialsResponse | null = null;
-  private credentialsClient: CredentialsClient;
+  private s3Client: S3Client;
+  private credentials: CloudCredentialsResponse;
   private retryOptions: RetryOptions;
 
-  constructor(credentialsClient: CredentialsClient, retryOptions?: RetryOptions) {
-    this.credentialsClient = credentialsClient;
+  constructor(credentials: CloudCredentialsResponse, retryOptions?: RetryOptions) {
+    this.credentials = credentials;
     this.retryOptions = retryOptions || {
       maxAttempts: 3,
       initialDelay: 1000,
       maxDelay: 10000,
       backoffFactor: 2,
     };
+    
+    this.s3Client = new S3Client({
+      region: 'us-east-1',
+      credentials: {
+        accessKeyId: this.credentials.accessKeyId,
+        secretAccessKey: this.credentials.secretAccessKey,
+        sessionToken: this.credentials.sessionToken,
+      },
+      maxAttempts: this.retryOptions.maxAttempts,
+      retryMode: 'adaptive',
+    });
+    
+    core.info('✅ S3 client initialized with cloud credentials');
   }
 
-  /**
-   * Initialize or refresh S3 client with current credentials
-   */
-  private async initializeS3Client(): Promise<void> {
-    try {
-      // Get fresh credentials if needed
-      this.credentials = await this.credentialsClient.refreshCredentialsIfNeeded(
-        this.credentials || undefined
-      );
-
-      this.s3Client = new S3Client({
-        region: 'us-east-1',
-        credentials: {
-          accessKeyId: this.credentials.accessKeyId,
-          secretAccessKey: this.credentials.secretAccessKey,
-          sessionToken: this.credentials.sessionToken,
-        },
-        maxAttempts: this.retryOptions.maxAttempts,
-        retryMode: 'adaptive',
-      });
-
-      core.info('✅ S3 client initialized with temporary credentials');
-    } catch (error) {
-      core.error(`Failed to initialize S3 client: ${error}`);
-      throw new Error(
-        `S3 client initialization failed: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-  }
 
   /**
    * Generate S3 key for log file
    */
-  private generateS3Key(workflowRunId: number, jobName: string, timestamp: string): string {
+  private generateS3Key(workflowRunId: number, jobName: string, timestamp: string, s3LogPath: string): string {
     const date = new Date(timestamp).toISOString().split('T')[0]; // YYYY-MM-DD
     const sanitizedJobName = jobName.replace(/[^a-zA-Z0-9-_]/g, '_');
     const timestampSuffix = new Date(timestamp).getTime();
 
-    return `build-logs/${date}/${workflowRunId}/${sanitizedJobName}_${timestampSuffix}.log`;
+    return `${s3LogPath}/${date}/${workflowRunId}/${sanitizedJobName}_${timestampSuffix}.log`;
   }
 
   /**
@@ -85,10 +67,10 @@ export class S3Uploader {
           break;
         }
 
-        // Check if credentials need refreshing
+        // Log credential errors but don't try to refresh (we have static credentials)
         if (this.isCredentialsError(error)) {
-          core.warning(`Credentials may be expired, refreshing... (attempt ${attempt})`);
-          await this.initializeS3Client();
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          core.warning(`Credentials error detected (attempt ${attempt}): ${errorMessage}`);
         }
 
         core.warning(
@@ -129,19 +111,11 @@ export class S3Uploader {
   async uploadLogFile(
     logContent: LogContent,
     workflowRunId: number,
-    workflowName: string
+    workflowName: string,
+    s3LogPath: string = 'logs'
   ): Promise<S3UploadResult> {
     return this.executeWithRetry(async () => {
-      // Ensure S3 client is initialized with valid credentials
-      if (!this.s3Client || !this.credentials) {
-        await this.initializeS3Client();
-      }
-
-      if (!this.s3Client || !this.credentials) {
-        throw new Error('Failed to initialize S3 client');
-      }
-
-      const s3Key = this.generateS3Key(workflowRunId, logContent.jobName, logContent.timestamp);
+      const s3Key = this.generateS3Key(workflowRunId, logContent.jobName, logContent.timestamp, s3LogPath);
       core.info(`Uploading log for job "${logContent.jobName}" to S3: ${s3Key}`);
 
       // Prepare metadata
@@ -199,7 +173,8 @@ export class S3Uploader {
   async uploadAllLogs(
     logs: LogContent[],
     workflowRunId: number,
-    workflowName: string
+    workflowName: string,
+    s3LogPath: string = 'logs'
   ): Promise<S3UploadResult[]> {
     if (logs.length === 0) {
       core.warning('No logs to upload');
@@ -217,7 +192,7 @@ export class S3Uploader {
       for (let i = 0; i < logs.length; i += concurrencyLimit) {
         const batch = logs.slice(i, i + concurrencyLimit);
         const batchPromises = batch.map(log =>
-          this.uploadLogFile(log, workflowRunId, workflowName).catch(error => {
+          this.uploadLogFile(log, workflowRunId, workflowName, s3LogPath).catch(error => {
             errors.push(`${log.jobName}: ${error.message}`);
             return null;
           })
@@ -248,7 +223,8 @@ export class S3Uploader {
   async uploadConsolidatedLogs(
     logs: LogContent[],
     workflowRunId: number,
-    workflowName: string
+    workflowName: string,
+    s3LogPath: string = 'logs'
   ): Promise<S3UploadResult> {
     try {
       core.info('Creating consolidated log file');
@@ -275,7 +251,7 @@ export class S3Uploader {
         timestamp: new Date().toISOString(),
       };
 
-      return await this.uploadLogFile(consolidatedLog, workflowRunId, workflowName);
+      return await this.uploadLogFile(consolidatedLog, workflowRunId, workflowName, s3LogPath);
     } catch (error) {
       core.error(`Failed to create consolidated log: ${error}`);
       throw new Error(
@@ -288,9 +264,6 @@ export class S3Uploader {
    * Get current bucket name
    */
   getBucket(): string {
-    if (!this.credentials) {
-      throw new Error('No credentials available - please initialize S3 client first');
-    }
     return this.credentials.bucket;
   }
 }

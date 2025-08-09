@@ -1,18 +1,15 @@
-name: 'Secure Build Log Uploader'
-description: 'Authenticates with API, uploads GitHub build logs to S3 using temporary credentials, and notifies backend'
-author: 'GitHub Actions Plugin'
+name: 'Hycos AI Log Analyzer'
+description: 'Uploads GitHub build logs to S3 for AI-powered analysis and debugging insights'
+author: 'Hycos AI'
 
 inputs:
-  username:
-    description: 'Username for API authentication'
-    required: true
-  password:
-    description: 'Password for API authentication'
+  api-key:
+    description: 'Hycos AI API authentication key'
     required: true
   api-endpoint:
-    description: 'Base URL for the API endpoints'
+    description: 'Base URL for the Hycos AI API endpoints'
     required: false
-    default: 'https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev/api'
+    default: 'https://api.hycos.ai'
   github-token:
     description: 'GitHub token for accessing workflow runs and logs'
     required: true
@@ -28,22 +25,24 @@ inputs:
     description: 'Initial delay between retries in seconds'
     required: false
     default: '2'
+  s3-log-path:
+    description: 'Custom S3 path prefix for log storage'
+    required: false
+    default: 'logs'
 
 outputs:
-  s3-url:
-    description: 'S3 URL where logs were uploaded'
+  analysis-url:
+    description: 'Direct link to Hycos AI analysis: https://app.hycos.ai/ci-analysis/{analysisId}'
+  analysis-id:
+    description: 'Unique analysis identifier'
   upload-status:
     description: 'Status of the upload process (success, failed)'
   files-uploaded:
     description: 'Number of files uploaded'
-  auth-status:
-    description: 'Authentication status (success, failed)'
-  user-info:
-    description: 'JSON string containing authenticated user information'
+  s3-url:
+    description: 'S3 URL where logs were uploaded'
   notification-status:
     description: 'Status of the upload notification (success, failed)'
-  analysis-url:
-    description: 'Direct link to the analysis UI (mock or real)'
 
 runs:
   using: 'node20'

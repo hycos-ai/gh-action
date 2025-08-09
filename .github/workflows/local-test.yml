@@ -12,10 +12,35 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm run package
-      - uses: ./ # ← ‘./’ means “use the action in this folder”
+      - name: Mock build with realistic logs that fails
+        run: |
+          echo "🚀 Starting build process..."
+          echo "📦 Installing dependencies..."
+          echo "npm WARN deprecated request@2.88.2: request has been deprecated"
+          echo "npm WARN deprecated har-validator@5.1.5: this library is no longer supported"
+          echo "added 847 packages, and audited 848 packages in 12s"
+          echo ""
+          echo "🔨 Compiling TypeScript..."
+          echo "src/index.ts:45:12 - error TS2304: Cannot find name 'proces'."
+          echo "45     const env = proces.env.NODE_ENV || 'development';"
+          echo "              ~~~~~~"
+          echo ""
+          echo "src/utils/config.ts:23:18 - error TS2339: Property 'API_ENDPOINT' does not exist on type 'ProcessEnv'."
+          echo "23   const endpoint = process.env.API_ENDPOINT?.trim()"
+          echo "                    ~~~~~~~~~~~~~~~~~~~~~~~~~"
+          echo ""
+          echo "🧪 Running tests..."
+          echo "  ✓ should validate input parameters"
+          echo "  ✓ should handle API authentication"  
+          echo "  ✗ should upload logs successfully"
+          echo "    Expected status 200 but got 401"
+          echo "    at /home/runner/work/test/src/upload.test.ts:89:23"
+          echo ""
+          echo "❌ Build failed with 2 TypeScript errors and 1 test failure"
+          exit 1
+      - uses: ./ # ← './' means "use the action in this folder"
+        if: always()
         with:
-          username: ${{ secrets.USERNAME }}
-          password: ${{ secrets.PASSWORD }}
-          # api-endpoint: 'http://54.89.53.140:8080/'
-          api-endpoint: 'https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev/'
+          api-key: ${{ secrets.HYCOS_API_KEY }}
+          api-endpoint: 'https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev'
           github-token: ${{ secrets.GITHUB_TOKEN }}

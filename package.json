@@ -1,7 +1,7 @@
 {
-  "name": "build-log-analyzer-action",
+  "name": "hycos-ai-github-action",
   "version": "1.0.0",
-  "description": "GitHub Action to upload build logs to S3 and analyze them",
+  "description": "Hycos AI GitHub Action for intelligent build log analysis",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc && ncc build dist/index.js -o dist --source-map --license licenses.txt",
@@ -9,21 +9,27 @@
     "test": "jest",
     "dev": "tsc --watch",
     "lint": "eslint src/**/*.ts",
-    "format": "prettier --write src/**/*.ts"
+    "format": "prettier --write src/**/*.ts",
+    "dev:build": "./scripts/build.sh",
+    "release:patch": "./scripts/release.sh patch",
+    "release:minor": "./scripts/release.sh minor",
+    "release:major": "./scripts/release.sh major"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-username/build-log-analyzer-action.git"
+    "url": "git+https://github.com/hycos-ai/github-action.git"
   },
   "keywords": [
     "github-action",
+    "ci-cd",
     "logs",
-    "s3",
-    "aws",
     "analysis",
+    "ai",
+    "debugging",
+    "hycos",
     "typescript"
   ],
-  "author": "Your Name",
+  "author": "Hycos AI",
   "license": "MIT",
   "dependencies": {
     "@actions/core": "^1.10.1",

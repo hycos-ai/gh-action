@@ -1,408 +1,144 @@
-# Secure Build Log Uploader GitHub Action
+# Hycos AI GitHub Action
 
-A secure GitHub Action that authenticates with an API, uploads build logs to AWS S3 using temporary credentials, and notifies the backend about successful uploads. Built with SOLID design principles and comprehensive error handling.
+Automatically upload your GitHub Actions build logs to Hycos AI for intelligent analysis and debugging insights.
 
-## ✨ Features
+## 🚀 Features
 
-- 🔐 **API Authentication**: Secure login with username/password credentials
-- 📥 **Log Download**: Automatically fetches logs from GitHub workflow runs
-- ☁️ **Temporary S3 Credentials**: Uses temporary AWS credentials from API for enhanced security
-- 📤 **Secure Upload**: Uploads logs to S3 with encryption and organized structure
-- 📢 **Upload Notification**: Notifies backend API about successful uploads
-- 🔄 **Retry Logic**: Automatic retry with exponential backoff for failed operations
-- 🎯 **Error Handling**: Comprehensive error handling and detailed logging
-- 🏗️ **SOLID Design**: Modular architecture with dependency injection
+- **Automatic Log Upload**: Securely uploads build logs to S3 when builds fail
+- **AI-Powered Analysis**: Get intelligent insights about build failures
+- **Zero Configuration**: Works out of the box with minimal setup
+- **Secure**: Uses temporary AWS credentials and API key authentication
+- **Rich Integration**: Displays analysis links in job summaries and outputs
 
-## 🚀 Quick Start
+## 📋 Quick Start
 
-### 1. Prerequisites
+1. **Get your Hycos AI API key** from [app.hycos.ai](https://app.hycos.ai)
 
-- API endpoint supporting the authentication and upload workflow
-- GitHub repository with Actions enabled
-- Required secrets configured in your repository
+2. **Add API key to repository secrets**: 
+   - Go to Settings → Secrets → Actions
+   - Add secret named `HYCOS_API_KEY`
 
-### 2. Required Secrets
-
-Add these secrets to your repository settings:
-
-```
-UPLOAD_USERNAME         # Username for API authentication
-UPLOAD_PASSWORD         # Password for API authentication
-API_ENDPOINT           # Base URL for the API (e.g., https://api.example.com)
-```
-
-### 3. Basic Usage
+3. **Add to your workflow**:
 
 ```yaml
-name: Upload Build Logs
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+name: Build and Test
+on: [push, pull_request]
 
 jobs:
-  upload-logs:
+  build:
     runs-on: ubuntu-latest
-    if: always() # Run even if other jobs fail
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Upload Build Logs
-        uses: ./
+      - uses: actions/checkout@v4
+      - name: Build and Test
+        run: |
+          # Your build commands here
+          npm ci
+          npm run build
+          npm test
+      
+      # Add Hycos AI analysis (runs on failure)
+      - name: Hycos AI Analysis
+        if: always() # Run even if previous steps failed
+        uses: hycos-ai/github-action@v1
         with:
-          username: ${{ secrets.UPLOAD_USERNAME }}
-          password: ${{ secrets.UPLOAD_PASSWORD }}
-          api-endpoint: ${{ secrets.API_ENDPOINT }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          api-key: ${{ secrets.HYCOS_API_KEY }}
 ```
 
-## 📋 Inputs
+## 🔧 Configuration
 
-| Input             | Description                                    | Required | Default               |
-| ----------------- | ---------------------------------------------- | -------- | --------------------- |
-| `username`        | Username for API authentication                | ✅       |                       |
-| `password`        | Password for API authentication                | ✅       |                       |
-| `api-endpoint`    | Base URL for the API endpoints                 | ✅       |                       |
-| `github-token`    | GitHub token for accessing workflow runs       | ✅       | `${{ github.token }}` |
-| `workflow-run-id` | Specific workflow run ID to analyze            | ❌       | Current run           |
-| `retry-attempts`  | Number of retry attempts for failed operations | ❌       | `3`                   |
-| `retry-delay`     | Initial delay between retries in seconds       | ❌       | `2`                   |
+### Inputs
 
-## 📤 Outputs
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `api-key` | Hycos AI API key | ✅ Yes | - |
+| `api-endpoint` | API endpoint URL | ❌ No | `https://api.hycos.ai` |
+| `github-token` | GitHub token | ❌ No | `${{ github.token }}` |
+| `workflow-run-id` | Specific run ID to analyze | ❌ No | Current run |
+| `retry-attempts` | Number of retry attempts | ❌ No | `3` |
+| `retry-delay` | Retry delay in seconds | ❌ No | `2` |
+| `s3-log-path` | Custom S3 path prefix | ❌ No | `logs` |
 
-| Output                | Description                                           |
-| --------------------- | ----------------------------------------------------- |
-| `s3-url`              | S3 URL where logs were uploaded                       |
-| `upload-status`       | Status of the upload process (success, failed)        |
-| `files-uploaded`      | Number of files uploaded                              |
-| `auth-status`         | Authentication status (success, failed)               |
-| `user-info`           | JSON string containing authenticated user information |
-| `notification-status` | Status of the upload notification (success, failed)   |
+### Outputs
 
-## 🔄 Workflow Process
+| Output | Description |
+|--------|-------------|
+| `analysis-url` | Direct link to analysis: `https://app.hycos.ai/ci-analysis/{id}` |
+| `analysis-id` | Unique analysis identifier |
+| `upload-status` | Upload status (`success`/`failed`) |
+| `files-uploaded` | Number of files uploaded |
+| `s3-url` | S3 location of uploaded logs |
+| `notification-status` | Notification status (`success`/`failed`) |
 
-The action follows this secure workflow:
+## 📊 Example with Outputs
 
-1. **Authentication** 🔐
-   - Authenticates with API using username/password
-   - Receives and stores authentication token
+```yaml
+- name: Hycos AI Analysis
+  id: hycos
+  if: always()
+  uses: hycos-ai/github-action@v1
+  with:
+    api-key: ${{ secrets.HYCOS_API_KEY }}
 
-2. **Credential Fetching** ☁️
-   - Fetches temporary AWS S3 credentials from API
-   - Validates credential expiration
-
-3. **Log Download** 📥
-   - Downloads all logs from GitHub workflow run
-   - Processes individual job logs
-
-4. **S3 Upload** 📤
-   - Uploads logs using temporary credentials
-   - Creates consolidated log file
-   - Implements retry logic with exponential backoff
-
-5. **Notification** 📢
-   - Notifies API about successful upload
-   - Includes file details and build information
-
-## 🔧 API Endpoints
-
-The action expects these API endpoints:
-
-### Authentication
-
-```
-POST /api/auth/login
+- name: Comment on PR
+  if: failure() && github.event_name == 'pull_request'
+  uses: actions/github-script@v6
+  with:
+    script: |
+      github.rest.issues.createComment({
+        issue_number: context.issue.number,
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        body: '🔍 **Build Analysis Available**: ${{ steps.hycos.outputs.analysis-url }}'
+      })
 ```
 
-**Request:**
+## 🛡️ Security
 
-```json
-{
-  "username": "string",
-  "password": "string"
-}
+- **API Key**: Store in GitHub repository secrets
+- **Temporary Credentials**: Uses short-lived AWS credentials
+- **No Data Exposure**: No sensitive data logged or exposed
+- **Secure Upload**: Server-side encryption (AES256)
+
+## 🔍 How It Works
+
+1. **Detects Build Status**: Only processes failed builds (unless forced)
+2. **Downloads Logs**: Securely retrieves build logs via GitHub API
+3. **Uploads to S3**: Uses temporary AWS credentials for secure upload
+4. **Triggers Analysis**: Notifies Hycos AI backend to start analysis
+5. **Displays Results**: Shows analysis link in job summary and outputs
+
+## 💡 Advanced Usage
+
+### Enterprise Setup
+```yaml
+- uses: hycos-ai/github-action@v1
+  with:
+    api-key: ${{ secrets.HYCOS_API_KEY }}
+    api-endpoint: 'https://your-enterprise.hycos.ai'
+    s3-log-path: 'enterprise-logs'
+    retry-attempts: 5
 ```
 
-**Response:**
-
-```json
-{
-  "token": "string",
-  "type": "string",
-  "username": "string",
-  "roles": ["string"]
-}
+### Conditional Analysis
+```yaml
+- uses: hycos-ai/github-action@v1
+  if: failure() && github.ref == 'refs/heads/main'
+  with:
+    api-key: ${{ secrets.HYCOS_API_KEY }}
 ```
 
-### Cloud Credentials
+## 📚 Documentation
 
-```
-GET /api/upload/cloud/credentials
-```
+- [Setup Guide](https://docs.hycos.ai/github-actions)
+- [API Documentation](https://docs.hycos.ai/api)
+- [Troubleshooting](https://docs.hycos.ai/troubleshooting)
 
-**Headers:** `Authorization: Bearer <token>`
+## 🐛 Issues & Support
 
-**Response:**
-
-```json
-{
-  "secretAccessKey": "string",
-  "accessKeyId": "string",
-  "sessionToken": "string",
-  "expiration": "string",
-  "bucket": "string"
-}
-```
-
-### Upload Notification
-
-```
-POST /api/upload/uploaded
-```
-
-**Headers:** `Authorization: Bearer <token>`
-
-**Request:**
-
-```json
-{
-  "files": [
-    {
-      "filename": "string",
-      "fileType": "LOG",
-      "bucketName": "string"
-    }
-  ],
-  "buildDetails": {
-    "folder": "string",
-    "jobName": "string",
-    "buildNumber": 0
-  },
-  "serverDetails": {
-    "serverAddress": "string"
-  }
-}
-```
-
-## 🗂️ S3 Organization Structure
-
-Logs are organized in S3 as follows:
-
-```
-s3://your-bucket/
-├── build-logs/
-│   ├── 2024-01-15/
-│   │   ├── 12345678/          # Workflow Run ID
-│   │   │   ├── build_*.log    # Individual job logs
-│   │   │   └── consolidated_*.log  # Combined log file
-│   │   └── 12345679/
-│   └── 2024-01-16/
-```
-
-## 🔄 Error Handling & Retry Logic
-
-The action implements comprehensive error handling:
-
-### Retry Configuration
-
-- **Max Attempts**: Configurable (default: 3)
-- **Initial Delay**: Configurable (default: 2 seconds)
-- **Max Delay**: 30 seconds
-- **Backoff Factor**: 2x (exponential backoff)
-
-### Error Types Handled
-
-- ✅ Network timeouts and connection issues
-- ✅ Authentication token expiration
-- ✅ AWS credential expiration
-- ✅ Rate limiting (429 errors)
-- ✅ Transient server errors (5xx)
-
-### Non-Retryable Errors
-
-- ❌ Invalid credentials (401)
-- ❌ Insufficient permissions (403)
-- ❌ Invalid request format (400)
-- ❌ Resource not found (404)
-
-## 🏗️ SOLID Design Principles
-
-The action follows SOLID principles:
-
-### Single Responsibility
-
-- `AuthClient`: Handles authentication only
-- `CredentialsClient`: Manages cloud credentials
-- `S3Uploader`: Handles S3 uploads
-- `NotificationClient`: Manages API notifications
-
-### Open/Closed
-
-- Extensible through dependency injection
-- Interface-based design allows easy swapping of implementations
-
-### Liskov Substitution
-
-- All clients implement consistent interfaces
-- Mock implementations available for testing
-
-### Interface Segregation
-
-- Small, focused interfaces per responsibility
-- `HttpClient`, `TokenStorage`, `S3Client` interfaces
-
-### Dependency Inversion
-
-- External dependencies injected via constructor
-- Easy to test and extend
-
-## 🛠️ Development
-
-### Setup
-
-1. Clone the repository
-
-```bash
-git clone <repository-url>
-cd secure-build-log-uploader
-```
-
-2. Install dependencies:
-
-```bash
-npm install
-```
-
-3. Build the action:
-
-```bash
-npm run build
-```
-
-4. Package for distribution:
-
-```bash
-npm run package
-```
-
-### Testing
-
-Run tests with:
-
-```bash
-npm test
-```
-
-Run linting:
-
-```bash
-npm run lint
-```
-
-Format code:
-
-```bash
-npm run format
-```
-
-### Project Structure
-
-```
-├── src/
-│   ├── index.ts              # Main entry point
-│   ├── types.ts              # TypeScript interfaces
-│   ├── auth-client.ts        # Authentication logic
-│   ├── credentials-client.ts # Cloud credentials management
-│   ├── github-client.ts      # GitHub API client
-│   ├── s3-uploader.ts        # S3 upload logic
-│   └── notification-client.ts # Upload notification logic
-├── tests/
-│   └── *.test.ts             # Unit tests
-├── action.yml                # GitHub Action configuration
-└── package.json              # Dependencies and scripts
-```
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-**Authentication Failed**
-
-- ✅ Verify username and password are correct
-- ✅ Check API endpoint URL
-- ✅ Ensure API service is running
-
-**Upload Failed**
-
-- ✅ Check network connectivity
-- ✅ Verify temporary credentials are valid
-- ✅ Ensure S3 bucket exists and is accessible
-
-**Notification Failed**
-
-- ✅ Verify authentication token is still valid
-- ✅ Check notification endpoint availability
-- ✅ Ensure proper permissions for upload notifications
-
-### Debug Information
-
-The action provides detailed logging:
-
-- 📊 Authentication status and user information
-- ☁️ Cloud credentials expiration times
-- 📤 Upload progress and file counts
-- 📢 Notification payload details
+Found a bug or need help? 
+- [Create an issue](https://github.com/hycos-ai/github-action/issues)
+- [Contact support](mailto:support@hycos.ai)
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📞 Support
-
-For issues and questions:
-
-1. Check the [troubleshooting section](#-troubleshooting)
-2. Review the action logs for detailed error messages
-3. Open an issue in the repository
-
-## 🚀 Quick Start for Any Repository
-
-1. Add the secrets once in your repo:
-   - `HYCOSAI_USER`
-   - `HYCOSAI_PASS`
-
-2. Drop this workflow file into `.github/workflows/hycosai-run-analyzer.yml`:
-
-```yaml
-name: HycosAI Run Analyzer
-
-on:
-  workflow_run:
-    workflows: ['*']
-    types: [completed]
-
-permissions:
-  actions: read
-  contents: read
-
-jobs:
-  analyze:
-    if: ${{ github.event.workflow_run.conclusion != 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: HycosAI Analyzer
-        uses: <YOUR-ORG>/run-analyzer-action@v1
-        with:
-          username: ${{ secrets.HYCOSAI_USER }}
-          password: ${{ secrets.HYCOSAI_PASS }}
-          # api-endpoint is optional; default is hard-coded
-```
-
-That’s it—on any failed workflow the analyzer uploads the logs and prints a HycosAI link in the job summary.
+[MIT License](LICENSE) - Copyright © Hycos AI

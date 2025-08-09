@@ -1,5 +1,4 @@
-import { CredentialsClient } from './credentials-client';
-import { LogContent, RetryOptions, S3UploadResult } from './types';
+import { CloudCredentialsResponse, LogContent, RetryOptions, S3UploadResult } from './types';
 /**
  * S3 Uploader with temporary credentials and retry logic
  * Follows SOLID principles with dependency injection
@@ -7,13 +6,8 @@ import { LogContent, RetryOptions, S3UploadResult } from './types';
 export declare class S3Uploader {
     private s3Client;
     private credentials;
-    private credentialsClient;
     private retryOptions;
-    constructor(credentialsClient: CredentialsClient, retryOptions?: RetryOptions);
-    /**
-     * Initialize or refresh S3 client with current credentials
-     */
-    private initializeS3Client;
+    constructor(credentials: CloudCredentialsResponse, retryOptions?: RetryOptions);
     /**
      * Generate S3 key for log file
      */
@@ -33,15 +27,15 @@ export declare class S3Uploader {
     /**
      * Upload a single log file to S3
      */
-    uploadLogFile(logContent: LogContent, workflowRunId: number, workflowName: string): Promise<S3UploadResult>;
+    uploadLogFile(logContent: LogContent, workflowRunId: number, workflowName: string, s3LogPath?: string): Promise<S3UploadResult>;
     /**
      * Upload all logs to S3 with controlled concurrency
      */
-    uploadAllLogs(logs: LogContent[], workflowRunId: number, workflowName: string): Promise<S3UploadResult[]>;
+    uploadAllLogs(logs: LogContent[], workflowRunId: number, workflowName: string, s3LogPath?: string): Promise<S3UploadResult[]>;
     /**
      * Create a consolidated log file and upload it
      */
-    uploadConsolidatedLogs(logs: LogContent[], workflowRunId: number, workflowName: string): Promise<S3UploadResult>;
+    uploadConsolidatedLogs(logs: LogContent[], workflowRunId: number, workflowName: string, s3LogPath?: string): Promise<S3UploadResult>;
     /**
      * Get current bucket name
      */

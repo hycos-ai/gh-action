@@ -2,29 +2,21 @@
  * Configuration interface for the action inputs
  */
 export interface ActionInputs {
-    username: string;
-    password: string;
+    apiKey: string;
     apiEndpoint: string;
     githubToken: string;
     workflowRunId?: string;
     retryAttempts: number;
     retryDelay: number;
+    s3LogPath: string;
 }
 /**
- * Authentication request payload
+ * API request headers interface
  */
-export interface AuthLoginRequest {
-    username: string;
-    password: string;
-}
-/**
- * Authentication response from login API
- */
-export interface AuthLoginResponse {
-    token: string;
-    type: string;
-    username: string;
-    roles: string[];
+export interface ApiRequestHeaders {
+    'X-API-Key': string;
+    'Content-Type'?: string;
+    [key: string]: string | undefined;
 }
 /**
  * Cloud credentials response from API
@@ -41,23 +33,27 @@ export interface CloudCredentialsResponse {
  */
 export interface UploadedFile {
     filename: string;
-    fileType: 'LOG';
+    fileType: 'LOG' | 'CONFIGURATION';
     bucketName: string;
+}
+/**
+ * Build metadata for notification - flexible structure
+ */
+export interface BuildMetadata {
+    [key: string]: any;
 }
 /**
  * Build details for notification
  */
 export interface BuildDetails {
-    folder: string;
-    jobName: string;
-    buildNumber: number;
+    metadata: BuildMetadata;
 }
 /**
  * Server details for notification
  */
 export interface ServerDetails {
     serverAddress: string;
-    type: string;
+    type: 'JENKINS' | 'TEAM_CITY' | 'CIRCLE_CI' | 'GITHUB_ACTIONS';
 }
 /**
  * Upload notification request payload
@@ -165,11 +161,11 @@ export interface AnalysisResult {
  * Action outputs
  */
 export interface ActionOutputs {
-    s3Url: string;
+    analysisUrl: string;
+    analysisId: string;
     uploadStatus: string;
     filesUploaded: number;
-    authStatus: string;
-    userInfo: string;
+    s3Url: string;
     notificationStatus: string;
 }
 /**
@@ -206,12 +202,27 @@ export interface TokenStorage {
     isTokenValid(): boolean;
 }
 /**
+ * Server registration request payload
+ */
+export interface ServerRegistrationRequest {
+    serverAddress: string;
+    type: 'JENKINS' | 'TEAM_CITY' | 'CIRCLE_CI' | 'GITHUB_ACTIONS';
+}
+/**
+ * Server registration response from API
+ */
+export interface ServerRegistrationResponse {
+    success: boolean;
+    serverId?: string;
+    message?: string;
+}
+/**
  * Upload notification response from API
  */
 export interface UploadNotificationResponse {
     success: boolean;
     analysisId: string;
-    analysisUrl?: string;
+    analysisUrl: string;
     message?: string;
 }
 /**
