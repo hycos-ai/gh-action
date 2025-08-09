@@ -330,7 +330,7 @@ async function notifyUploadComplete(
 /**
  * Main action execution following the specified flow
  */
-async function run(): Promise<void> {
+export async function run(): Promise<void> {
   let uploadStatus = 'failed';
   let filesUploaded = 0;
   let notificationStatus = 'failed';

@@ -1,6 +1,6 @@
 {
   "name": "hycos-ai-github-action",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Hycos AI GitHub Action for intelligent build log analysis",
   "main": "dist/index.js",
   "scripts": {
@@ -40,6 +40,7 @@
     "node-fetch": "^3.3.2"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.12",
     "@types/node": "^20.8.0",
     "@typescript-eslint/eslint-plugin": "^6.7.0",
     "@typescript-eslint/parser": "^6.7.0",

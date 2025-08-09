@@ -72960,7 +72960,15 @@ class GitHubClient {
     owner;
     repo;
     constructor(token) {
-        this.octokit = (0, github_1.getOctokit)(token);
+        // Align with GitHub Docs API versioning
+        this.octokit = (0, github_1.getOctokit)(token, {
+            request: {
+                headers: {
+                    'X-GitHub-Api-Version': '2022-11-28',
+                    Accept: 'application/vnd.github+json',
+                },
+            },
+        });
         // Get repository info from environment
         const repository = process.env.GITHUB_REPOSITORY;
         if (!repository) {
@@ -73021,8 +73029,27 @@ class GitHubClient {
                     },
                 };
             }
-            core.error(`Failed to fetch workflow run: ${error}`);
-            throw new Error(`Failed to fetch workflow run: ${error instanceof Error ? error.message : String(error)}`);
+            const envRunId = runId || process.env.GITHUB_RUN_ID;
+            const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
+            const workflowName = process.env.GITHUB_WORKFLOW || 'Unknown Workflow';
+            const now = new Date().toISOString();
+            if (!envRunId) {
+                throw new Error(`Failed to fetch workflow run and no fallback run ID available: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            core.warning(`Could not fetch workflow run from API; continuing with environment-based metadata: ${error instanceof Error ? error.message : String(error)}`);
+            return {
+                id: parseInt(envRunId, 10),
+                name: workflowName,
+                status: null,
+                conclusion: null,
+                created_at: now,
+                updated_at: now,
+                html_url: `${serverUrl}/${this.owner}/${this.repo}/actions/runs/${envRunId}`,
+                repository: {
+                    full_name: `${this.owner}/${this.repo}`,
+                    html_url: `${serverUrl}/${this.owner}/${this.repo}`,
+                },
+            };
         }
     }
     /**
@@ -73047,8 +73074,8 @@ class GitHubClient {
             }));
         }
         catch (error) {
-            core.error(`Failed to fetch workflow jobs: ${error}`);
-            throw new Error(`Failed to fetch workflow jobs: ${error instanceof Error ? error.message : String(error)}`);
+            core.warning(`Could not list jobs for workflow run ${runId}; continuing without job details: ${error instanceof Error ? error.message : String(error)}`);
+            return [];
         }
     }
     /**
@@ -73076,12 +73103,12 @@ class GitHubClient {
             };
         }
         catch (error) {
-            core.warning(`Failed to download logs for job ${jobName}: ${error}`);
+            core.warning(`Failed to download logs for job ${jobName}; continuing without logs: ${error instanceof Error ? error.message : String(error)}`);
             // Return empty content instead of failing completely
             return {
                 jobName,
                 jobId,
-                content: `Failed to download logs: ${error instanceof Error ? error.message : String(error)}`,
+                content: 'Log content unavailable',
                 timestamp: new Date().toISOString(),
             };
         }
@@ -73164,6 +73191,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.run = run;
 const core = __importStar(__nccwpck_require__(7484));
 const axios_1 = __importDefault(__nccwpck_require__(7269));
 const github_client_1 = __nccwpck_require__(7890);
@@ -73285,35 +73313,25 @@ async function registerServer(apiEndpoint, apiKey, serverAddress, serverType) {
         type: serverType,
     };
     const url = `${apiEndpoint}/build/server`;
-    core.startGroup('🔍 VERBOSE DEBUG - Server Registration Request');
+    // Redact sensitive data in logs
+    core.startGroup('🔍 Server Registration Request');
     core.info(`📡 Request Method: POST`);
     core.info(`📡 Request URL: ${url}`);
-    core.info(`📡 Request Headers:`);
-    Object.entries(headers).forEach(([key, value]) => {
-        if (key.toLowerCase() === 'x-api-key') {
-            core.info(`  ${key}: ${value.substring(0, 10)}***`);
-        }
-        else {
-            core.info(`  ${key}: ${value}`);
-        }
-    });
-    core.info(`📡 Request Body: ${JSON.stringify(payload, null, 2)}`);
     core.endGroup();
     try {
         const response = await axios_1.default.post(url, payload, { headers });
-        core.startGroup('🔍 VERBOSE DEBUG - Server Registration Response');
+        core.startGroup('🔍 Server Registration Response');
         core.info(`📡 Response Status: ${response.status}`);
         core.info(`📡 Response Status Text: ${response.statusText}`);
-        core.info(`📡 Response Data: ${JSON.stringify(response.data, null, 2)}`);
         core.endGroup();
         return response.data;
     }
     catch (error) {
-        core.startGroup('🔍 VERBOSE DEBUG - Server Registration Error');
+        core.startGroup('🔍 Server Registration Error');
         core.error(`📡 Server registration failed: ${error.message}`);
         if (error.response) {
             core.error(`📡 Error Status: ${error.response.status}`);
-            core.error(`📡 Error Data: ${JSON.stringify(error.response.data, null, 2)}`);
+            core.error(`📡 Error Data: [redacted]`);
         }
         core.endGroup();
         throw error;
@@ -73329,7 +73347,7 @@ async function getCloudCredentials(apiEndpoint, apiKey) {
     };
     const url = `${apiEndpoint}/api/upload/cloud/credentials`;
     core.info(`🌐 Making API call to: ${url}`);
-    core.info(`🔑 Using API key: ${apiKey.substring(0, 10)}***`);
+    // Do not print API keys
     const response = await axios_1.default.get(url, { headers });
     core.info(`📡 API Response status: ${response.status}`);
     core.info(`📡 API Response data: ${JSON.stringify(response.data, null, 2)}`);
@@ -73349,59 +73367,30 @@ async function notifyUploadComplete(apiEndpoint, apiKey, uploadedFiles, buildDet
         serverDetails,
     };
     const url = `${apiEndpoint}/api/upload/uploaded`;
-    // VERBOSE DEBUGGING - REQUEST
-    core.startGroup('🔍 VERBOSE DEBUG - Upload Notification Request');
+    // Redact sensitive request data
+    core.startGroup('🔍 Upload Notification Request');
     core.info(`📡 Request Method: POST`);
     core.info(`📡 Request URL: ${url}`);
-    core.info(`📡 Request Headers:`);
-    Object.entries(headers).forEach(([key, value]) => {
-        if (key.toLowerCase() === 'x-api-key') {
-            core.info(`  ${key}: ${value.substring(0, 10)}***`);
-        }
-        else {
-            core.info(`  ${key}: ${value}`);
-        }
-    });
-    core.info(`📡 Request Body (Raw JSON):`);
-    core.info(JSON.stringify(payload, null, 2));
-    core.info(`📡 Request Body Size: ${JSON.stringify(payload).length} bytes`);
     core.endGroup();
     try {
         const response = await axios_1.default.post(url, payload, {
             headers,
             // Add response interceptor for full debugging
-            transformResponse: [(data) => {
-                    core.startGroup('🔍 VERBOSE DEBUG - Upload Notification Response');
-                    core.info(`📡 Raw Response Data: ${data}`);
-                    core.info(`📡 Raw Response Type: ${typeof data}`);
-                    core.info(`📡 Raw Response Length: ${data ? data.length : 'null'} characters`);
-                    // Try to parse as JSON
+            transformResponse: [
+                data => {
+                    // Parse if possible; avoid logging raw data
                     try {
-                        const parsed = JSON.parse(data);
-                        core.info(`📡 Parsed JSON Response: ${JSON.stringify(parsed, null, 2)}`);
-                        return parsed;
+                        return JSON.parse(data);
                     }
-                    catch (parseError) {
-                        core.info(`📡 Response is not valid JSON, treating as raw data: "${data}"`);
-                        // Check if it's a numeric ID (from Java endpoint)
+                    catch {
                         const numericId = parseInt(data);
-                        if (!isNaN(numericId)) {
-                            core.info(`📡 Detected numeric ID: ${numericId}`);
-                            return numericId;
-                        }
-                        return data;
+                        return isNaN(numericId) ? data : numericId;
                     }
-                }]
+                },
+            ],
         });
-        // VERBOSE DEBUGGING - RESPONSE  
+        // Minimal response logging
         core.info(`📡 Response Status: ${response.status}`);
-        core.info(`📡 Response Status Text: ${response.statusText}`);
-        core.info(`📡 Response Headers:`);
-        Object.entries(response.headers).forEach(([key, value]) => {
-            core.info(`  ${key}: ${value}`);
-        });
-        core.info(`📡 Response Data Type: ${typeof response.data}`);
-        core.info(`📡 Response Data: ${JSON.stringify(response.data, null, 2)}`);
         // Check if response has expected structure
         if (typeof response.data === 'object' && response.data !== null) {
             core.info(`📡 Response Properties:`);
@@ -73521,9 +73510,11 @@ async function run() {
         core.endGroup();
         // Check if we're in act environment for testing
         const isActEnvironment = process.env.ACT === 'true';
-        // Exit early if the run was successful or neutral (unless in act environment for testing)
+        // Exit early only when the run completed without failures
         const nonFailureConclusions = ['success', 'neutral', 'skipped'];
-        if (!isActEnvironment && (!workflowRun.conclusion || nonFailureConclusions.includes(workflowRun.conclusion))) {
+        if (!isActEnvironment &&
+            workflowRun.conclusion &&
+            nonFailureConclusions.includes(workflowRun.conclusion)) {
             core.info('🏁 Workflow concluded without failures – skipping log upload.');
             setActionOutputs({
                 analysisUrl: '',
@@ -73563,12 +73554,9 @@ async function run() {
         core.startGroup('☁️ Getting cloud credentials and uploading to S3');
         const cloudCredentials = await getCloudCredentials(inputs.apiEndpoint, inputs.apiKey);
         // Debug: Print credentials details (safely)
-        core.info(`🔑 Credentials Details:`);
-        core.info(`  - Access Key ID: ${cloudCredentials.accessKeyId ? cloudCredentials.accessKeyId.substring(0, 8) + '***' : 'undefined'}`);
-        core.info(`  - Secret Key: ${cloudCredentials.secretAccessKey ? '***' + cloudCredentials.secretAccessKey.slice(-4) : 'undefined'}`);
-        core.info(`  - Session Token: ${cloudCredentials.sessionToken ? cloudCredentials.sessionToken.substring(0, 20) + '...' : 'undefined'}`);
-        core.info(`  - Bucket: ${cloudCredentials.bucket || 'undefined'}`);
-        core.info(`  - Expiration: ${cloudCredentials.expiration || 'undefined'}`);
+        core.info(`🔑 Received temporary cloud credentials`);
+        core.info(`  - Bucket: ${cloudCredentials.bucket ? '[redacted]' : 'undefined'}`);
+        core.info(`  - Expiration: ${cloudCredentials.expiration ? '[redacted]' : 'undefined'}`);
         const s3Uploader = new s3_uploader_1.S3Uploader(cloudCredentials, retryOptions);
         const uploadResults = await s3Uploader.uploadAllLogs(logs, workflowRun.id, workflowRun.name, inputs.s3LogPath);
         if (uploadResults.length === 0) {
