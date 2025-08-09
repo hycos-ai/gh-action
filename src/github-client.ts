@@ -8,7 +8,15 @@ export class GitHubClient {
   private repo: string;
 
   constructor(token: string) {
-    this.octokit = getOctokit(token);
+    // Align with GitHub Docs API versioning
+    this.octokit = getOctokit(token, {
+      request: {
+        headers: {
+          'X-GitHub-Api-Version': '2022-11-28',
+          Accept: 'application/vnd.github+json',
+        },
+      },
+    });
 
     // Get repository info from environment
     const repository = process.env.GITHUB_REPOSITORY;
@@ -76,10 +84,38 @@ export class GitHubClient {
         };
       }
 
-      core.error(`Failed to fetch workflow run: ${error}`);
-      throw new Error(
-        `Failed to fetch workflow run: ${error instanceof Error ? error.message : String(error)}`
+      const envRunId = runId || process.env.GITHUB_RUN_ID;
+      const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
+      const workflowName = process.env.GITHUB_WORKFLOW || 'Unknown Workflow';
+      const now = new Date().toISOString();
+
+      if (!envRunId) {
+        throw new Error(
+          `Failed to fetch workflow run and no fallback run ID available: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+
+      core.warning(
+        `Could not fetch workflow run from API; continuing with environment-based metadata: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
+
+      return {
+        id: parseInt(envRunId, 10),
+        name: workflowName,
+        status: null,
+        conclusion: null,
+        created_at: now,
+        updated_at: now,
+        html_url: `${serverUrl}/${this.owner}/${this.repo}/actions/runs/${envRunId}`,
+        repository: {
+          full_name: `${this.owner}/${this.repo}`,
+          html_url: `${serverUrl}/${this.owner}/${this.repo}`,
+        },
+      };
     }
   }
 
@@ -106,10 +142,12 @@ export class GitHubClient {
         html_url: job.html_url || null,
       }));
     } catch (error) {
-      core.error(`Failed to fetch workflow jobs: ${error}`);
-      throw new Error(
-        `Failed to fetch workflow jobs: ${error instanceof Error ? error.message : String(error)}`
+      core.warning(
+        `Could not list jobs for workflow run ${runId}; continuing without job details: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
+      return [];
     }
   }
 
@@ -141,12 +179,16 @@ export class GitHubClient {
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
-      core.warning(`Failed to download logs for job ${jobName}: ${error}`);
+      core.warning(
+        `Failed to download logs for job ${jobName}; continuing without logs: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
       // Return empty content instead of failing completely
       return {
         jobName,
         jobId,
-        content: `Failed to download logs: ${error instanceof Error ? error.message : String(error)}`,
+        content: 'Log content unavailable',
         timestamp: new Date().toISOString(),
       };
     }
