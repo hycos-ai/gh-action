@@ -1,5 +1,6 @@
 name: Local Test
-on: [push]
+on:
+  workflow_dispatch: # Manual trigger only
 jobs:
   upload:
     runs-on: ubuntu-latest
