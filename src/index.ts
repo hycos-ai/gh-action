@@ -264,6 +264,22 @@ async function notifyUploadComplete(
 
     // Minimal response logging
     core.info(`📡 Response Status: ${response.status}`);
+    core.info(`📡 Response Status Text: ${response.statusText}`);
+
+    // Response headers (safe to print)
+    core.startGroup('🔍 Upload Notification Response Headers');
+    try {
+      Object.entries(response.headers || {}).forEach(([key, value]) => {
+        core.info(`  ${key}: ${Array.isArray(value) ? value.join(', ') : String(value)}`);
+      });
+    } catch (hdrErr) {
+      core.info(
+        `📡 Failed to print response headers: ${
+          hdrErr instanceof Error ? hdrErr.message : String(hdrErr)
+        }`
+      );
+    }
+    core.endGroup();
 
     // Full response body logging for debugging
     core.startGroup('🔍 Upload Notification Full Response');
@@ -272,9 +288,12 @@ async function notifyUploadComplete(
       const dataType = typeof rawData;
       core.info(`📡 Response Data Type: ${dataType}`);
       if (typeof rawData === 'string') {
+        core.info(`📡 Response Body Length: ${rawData.length}`);
         core.info(`📡 Response Body (raw): ${rawData}`);
       } else {
-        core.info(`📡 Response Body (JSON): ${JSON.stringify(rawData, null, 2)}`);
+        const jsonString = JSON.stringify(rawData, null, 2);
+        core.info(`📡 Response Body Length: ${jsonString ? jsonString.length : 0}`);
+        core.info(`📡 Response Body (JSON): ${jsonString}`);
       }
     } catch (logErr) {
       core.info(
