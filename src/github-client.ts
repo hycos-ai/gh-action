@@ -164,20 +164,35 @@ export class GitHubClient {
         job_id: jobId,
       });
 
-      // The response is a redirect URL to the actual logs
-      const logsResponse = await fetch(response.url);
-      if (!logsResponse.ok) {
-        throw new Error(`Failed to download logs: ${logsResponse.statusText}`);
+      // The response is a redirect URL to the actual logs with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
+      try {
+        const logsResponse = await fetch(response.url, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        
+        if (!logsResponse.ok) {
+          throw new Error(`Failed to download logs: ${logsResponse.statusText}`);
+        }
+        
+        const logContent = await logsResponse.text();
+
+        return {
+          jobName,
+          jobId,
+          content: logContent,
+          timestamp: new Date().toISOString(),
+        };
+      } catch (error) {
+        clearTimeout(timeoutId);
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw new Error('Log download timed out after 60 seconds');
+        }
+        throw error;
       }
-
-      const logContent = await logsResponse.text();
-
-      return {
-        jobName,
-        jobId,
-        content: logContent,
-        timestamp: new Date().toISOString(),
-      };
     } catch (error) {
       core.warning(
         `Failed to download logs for job ${jobName}; continuing without logs: ${

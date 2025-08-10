@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * Configuration interface for the action inputs
  */
@@ -37,10 +38,18 @@ export interface UploadedFile {
     bucketName: string;
 }
 /**
- * Build metadata for notification - flexible structure
+ * Build metadata for notification with specific required fields
  */
 export interface BuildMetadata {
-    [key: string]: any;
+    jobName: string;
+    buildNumber: string;
+    repository: string;
+    branch: string;
+    commit: string;
+    buildUrl: string;
+    triggeredBy: string;
+    buildStatus: string;
+    [key: string]: string | number | boolean | null | undefined;
 }
 /**
  * Build details for notification
@@ -181,16 +190,24 @@ export interface RetryOptions {
  * HTTP client interface for dependency injection
  */
 export interface HttpClient {
-    get<T>(url: string, config?: any): Promise<T>;
-    post<T>(url: string, data?: any, config?: any): Promise<T>;
-    put<T>(url: string, data?: any, config?: any): Promise<T>;
-    delete<T>(url: string, config?: any): Promise<T>;
+    get<T>(url: string, config?: Record<string, unknown>): Promise<T>;
+    post<T>(url: string, data?: unknown, config?: Record<string, unknown>): Promise<T>;
+    put<T>(url: string, data?: unknown, config?: Record<string, unknown>): Promise<T>;
+    delete<T>(url: string, config?: Record<string, unknown>): Promise<T>;
 }
 /**
  * S3 client interface for dependency injection
  */
 export interface S3Client {
-    upload(params: any): Promise<S3UploadResult>;
+    upload(params: {
+        Bucket: string;
+        Key: string;
+        Body: string | Buffer;
+        ContentType?: string;
+        Metadata?: Record<string, string>;
+        ServerSideEncryption?: string;
+        ACL?: string;
+    }): Promise<S3UploadResult>;
 }
 /**
  * Token storage interface

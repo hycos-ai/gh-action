@@ -1,7 +1,9 @@
 import * as core from '@actions/core';
-import axios from 'axios';
 import { GitHubClient } from './github-client';
 import { S3Uploader } from './s3-uploader';
+import { HttpClient } from './utils/http-client';
+import { InputValidator } from './utils/input-validator';
+import { ErrorHandler, ValidationError, ApiError } from './utils/error-handler';
 import {
   ActionInputs,
   ActionOutputs,
@@ -19,22 +21,44 @@ import {
 const DEFAULT_API_BASE_URL = 'https://api.hycos.ai';
 
 /**
- * Parse action inputs from environment variables
+ * Parse and validate action inputs from environment variables
+ * @returns Validated action inputs
  */
 function getActionInputs(): ActionInputs {
-  return {
-    apiKey: core.getInput('api-key', { required: true }),
-    apiEndpoint: core.getInput('api-endpoint', { required: false }) || DEFAULT_API_BASE_URL,
-    githubToken: core.getInput('github-token', { required: true }),
-    workflowRunId: core.getInput('workflow-run-id') || undefined,
-    retryAttempts: parseInt(core.getInput('retry-attempts') || '3', 10),
-    retryDelay: parseInt(core.getInput('retry-delay') || '2', 10),
-    s3LogPath: core.getInput('s3-log-path') || 'logs',
-  };
+  try {
+    const rawInputs: Partial<ActionInputs> = {
+      apiKey: core.getInput('api-key'),
+      apiEndpoint: core.getInput('api-endpoint') || DEFAULT_API_BASE_URL,
+      githubToken: core.getInput('github-token'),
+      workflowRunId: core.getInput('workflow-run-id') || undefined,
+      retryAttempts: parseInt(core.getInput('retry-attempts') || '3', 10),
+      retryDelay: parseInt(core.getInput('retry-delay') || '2', 10),
+      s3LogPath: core.getInput('s3-log-path'),
+    };
+
+    return InputValidator.validateInputs(rawInputs);
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw error;
+    }
+    throw new ValidationError(`Failed to parse action inputs: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /**
- * Set action outputs
+ * Set GitHub Action outputs for downstream consumption
+ * @param outputs - The action outputs to set
+ * @example
+ * ```typescript
+ * setActionOutputs({
+ *   analysisUrl: 'https://app.hycos.ai/ci-analysis/12345',
+ *   analysisId: '12345',
+ *   uploadStatus: 'success',
+ *   filesUploaded: 3,
+ *   s3Url: 's3://bucket/path/to/logs',
+ *   notificationStatus: 'success'
+ * });
+ * ```
  */
 function setActionOutputs(outputs: ActionOutputs): void {
   core.setOutput('analysis-url', outputs.analysisUrl);
@@ -47,6 +71,17 @@ function setActionOutputs(outputs: ActionOutputs): void {
 
 /**
  * Generic helper to print a boxed section with a title and content lines
+ * Creates a visually appealing box around content for better log readability
+ * @param title - The title to display at the top of the box
+ * @param lines - Array of content lines to display in the box
+ * @example
+ * ```typescript
+ * printBox('Analysis Results', [
+ *   'Status: Complete',
+ *   'Issues Found: 3',
+ *   'Time: 2.5 seconds'
+ * ]);
+ * ```
  */
 function printBox(title: string, lines: string[]): void {
   const allLines = [title, ...lines];
@@ -75,7 +110,13 @@ function printBox(title: string, lines: string[]): void {
 }
 
 /**
- * Print analysis link in logs and job summary, and set as output
+ * Display the analysis link in logs and GitHub job summary
+ * @param link - The analysis URL to display
+ * @throws {Error} If writing to job summary fails
+ * @example
+ * ```typescript
+ * await displayAnalysisLink('https://app.hycos.ai/ci-analysis/12345');
+ * ```
  */
 async function displayAnalysisLink(link: string): Promise<void> {
   core.startGroup('🔗 HycosAI Analysis');
@@ -98,7 +139,23 @@ async function displayAnalysisLink(link: string): Promise<void> {
 }
 
 /**
- * Collect and display useful build metadata from GitHub environment variables and the workflowRun object
+ * Collect and display useful build metadata from GitHub environment variables
+ * @param workflowRun - The workflow run object containing basic information
+ * @param workflowRun.id - The workflow run ID
+ * @param workflowRun.name - The workflow name  
+ * @param workflowRun.repository - Repository information
+ * @throws {Error} If writing to job summary fails
+ * @example
+ * ```typescript
+ * await displayBuildMetadata({
+ *   id: 12345,
+ *   name: 'CI Build',
+ *   repository: {
+ *     full_name: 'owner/repo',
+ *     html_url: 'https://github.com/owner/repo'
+ *   }
+ * });
+ * ```
  */
 async function displayBuildMetadata(workflowRun: {
   id: number;
@@ -146,228 +203,130 @@ async function displayBuildMetadata(workflowRun: {
 
 /**
  * Register CI server with Hycos API using API key
+ * @param httpClient - HTTP client instance
+ * @param apiEndpoint - API base endpoint
+ * @param apiKey - API authentication key  
+ * @param serverAddress - Server address
+ * @param serverType - Type of CI server
+ * @returns Server registration response
  */
 async function registerServer(
+  httpClient: HttpClient,
   apiEndpoint: string,
   apiKey: string,
   serverAddress: string,
   serverType: 'GITHUB_ACTIONS'
 ): Promise<ServerRegistrationResponse> {
-  const headers: Record<string, string> = {
-    'X-API-Key': apiKey,
-    'Content-Type': 'application/json',
-  };
-
-  const payload: ServerRegistrationRequest = {
-    serverAddress,
-    type: serverType,
-  };
-
-  const url = `${apiEndpoint}/build/server`;
-
-  // Redact sensitive data in logs
-  core.startGroup('🔍 Server Registration Request');
-  core.info(`📡 Request Method: POST`);
-  core.info(`📡 Request URL: ${url}`);
-  core.endGroup();
-
   try {
-    const response = await axios.post<ServerRegistrationResponse>(url, payload, { headers });
-
-    core.startGroup('🔍 Server Registration Response');
-    core.info(`📡 Response Status: ${response.status}`);
-    core.info(`📡 Response Status Text: ${response.statusText}`);
+    core.startGroup('🔍 Server Registration');
+    core.info(`📡 Registering server: ${serverAddress}`);
+    core.info(`📡 Server type: ${serverType}`);
     core.endGroup();
 
-    return response.data;
-  } catch (error: any) {
-    core.startGroup('🔍 Server Registration Error');
-    core.error(`📡 Server registration failed: ${error.message}`);
-    if (error.response) {
-      core.error(`📡 Error Status: ${error.response.status}`);
-      core.error(`📡 Error Data: [redacted]`);
+    const payload: ServerRegistrationRequest = {
+      serverAddress,
+      type: serverType,
+    };
+
+    const response = await httpClient.post<ServerRegistrationResponse>(
+      '/build/server',
+      payload,
+      { headers: HttpClient.createAuthHeaders(apiKey) }
+    );
+
+    core.info('✅ Server registration successful');
+    if (response.serverId) {
+      core.info(`📋 Server ID: ${response.serverId}`);
     }
-    core.endGroup();
-    throw error;
+
+    return response;
+  } catch (error) {
+    throw new ApiError(
+      `Server registration failed: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof ApiError ? error.status : undefined
+    );
   }
 }
 
 /**
  * Get cloud credentials from Hycos API using API key
+ * @param httpClient - HTTP client instance
+ * @param apiKey - API authentication key
+ * @returns Cloud credentials response
  */
 async function getCloudCredentials(
-  apiEndpoint: string,
+  httpClient: HttpClient,
   apiKey: string
 ): Promise<CloudCredentialsResponse> {
-  const headers: Record<string, string> = {
-    'X-API-Key': apiKey,
-    'Content-Type': 'application/json',
-  };
+  try {
+    core.info('🔑 Requesting temporary cloud credentials');
 
-  const url = `${apiEndpoint}/api/upload/cloud/credentials`;
-  core.info(`🌐 Making API call to: ${url}`);
-  // Do not print API keys
+    const response = await httpClient.get<CloudCredentialsResponse>(
+      '/api/upload/cloud/credentials',
+      { headers: HttpClient.createAuthHeaders(apiKey) }
+    );
 
-  const response = await axios.get<CloudCredentialsResponse>(url, { headers });
+    // Log success without exposing credentials
+    core.info('✅ Cloud credentials received successfully');
+    core.info(`  - Bucket configured: ${response.bucket ? 'Yes' : 'No'}`);
+    core.info(`  - Credentials expire: ${response.expiration ? 'Yes' : 'No'}`);
 
-  core.info(`📡 API Response status: ${response.status}`);
-  core.info(`📡 API Response data: ${JSON.stringify(response.data, null, 2)}`);
-
-  return response.data;
+    return response;
+  } catch (error) {
+    throw new ApiError(
+      `Failed to get cloud credentials: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof ApiError ? error.status : undefined
+    );
+  }
 }
 
 /**
  * Notify Hycos API about upload completion using API key
+ * @param httpClient - HTTP client instance
+ * @param apiKey - API authentication key
+ * @param uploadedFiles - List of uploaded files
+ * @param buildDetails - Build metadata
+ * @param serverDetails - Server information
+ * @returns Upload notification response
  */
 async function notifyUploadComplete(
-  apiEndpoint: string,
+  httpClient: HttpClient,
   apiKey: string,
   uploadedFiles: UploadedFile[],
   buildDetails: BuildDetails,
   serverDetails: ServerDetails
 ): Promise<UploadNotificationResponse | number | string> {
-  const headers: Record<string, string> = {
-    'X-API-Key': apiKey,
-    'Content-Type': 'application/json',
-  };
-
-  const payload: UploadNotificationRequest = {
-    files: uploadedFiles,
-    buildDetails,
-    serverDetails,
-  };
-
-  const url = `${apiEndpoint}/api/upload/uploaded`;
-
-  // Redact sensitive request data
-  core.startGroup('🔍 Upload Notification Request');
-  core.info(`📡 Request Method: POST`);
-  core.info(`📡 Request URL: ${url}`);
-  core.endGroup();
-
   try {
-    const response = await axios.post<UploadNotificationResponse>(url, payload, {
-      headers,
-      // Add response interceptor for full debugging
-      transformResponse: [
-        data => {
-          // Parse if possible; avoid logging raw data
-          try {
-            return JSON.parse(data);
-          } catch {
-            const numericId = parseInt(data);
-            return isNaN(numericId) ? data : numericId;
-          }
-        },
-      ],
-    });
-
-    // Minimal response logging
-    core.info(`📡 Response Status: ${response.status}`);
-    core.info(`📡 Response Status Text: ${response.statusText}`);
-
-    // Response headers (safe to print)
-    core.startGroup('🔍 Upload Notification Response Headers');
-    try {
-      Object.entries(response.headers || {}).forEach(([key, value]) => {
-        core.info(`  ${key}: ${Array.isArray(value) ? value.join(', ') : String(value)}`);
-      });
-    } catch (hdrErr) {
-      core.info(
-        `📡 Failed to print response headers: ${
-          hdrErr instanceof Error ? hdrErr.message : String(hdrErr)
-        }`
-      );
-    }
+    core.startGroup('📢 Upload Notification');
+    core.info(`📡 Notifying API about ${uploadedFiles.length} uploaded files`);
+    core.info(`📡 Build: ${buildDetails.metadata.jobName}`);
+    core.info(`📡 Repository: ${buildDetails.metadata.repository}`);
     core.endGroup();
 
-    // Full response body logging for debugging
-    core.startGroup('🔍 Upload Notification Full Response');
-    try {
-      const rawData: unknown = response.data as unknown;
-      const dataType = typeof rawData;
-      core.info(`📡 Response Data Type: ${dataType}`);
-      if (typeof rawData === 'string') {
-        core.info(`📡 Response Body Length: ${rawData.length}`);
-        core.info(`📡 Response Body (raw): ${rawData}`);
-      } else {
-        const jsonString = JSON.stringify(rawData, null, 2);
-        core.info(`📡 Response Body Length: ${jsonString ? jsonString.length : 0}`);
-        core.info(`📡 Response Body (JSON): ${jsonString}`);
-      }
-    } catch (logErr) {
-      core.info(
-        `📡 Failed to stringify response body: ${
-          logErr instanceof Error ? logErr.message : String(logErr)
-        }`
-      );
-    }
-    core.endGroup();
+    const payload: UploadNotificationRequest = {
+      files: uploadedFiles,
+      buildDetails,
+      serverDetails,
+    };
 
-    // Check if response has expected structure
-    if (typeof response.data === 'object' && response.data !== null) {
-      core.info(`📡 Response Properties:`);
-      Object.keys(response.data).forEach(key => {
-        core.info(`  - ${key}: ${JSON.stringify((response.data as any)[key])}`);
-      });
-    }
+    const response = await httpClient.post<UploadNotificationResponse | number | string>(
+      '/api/upload/uploaded',
+      payload,
+      { headers: HttpClient.createAuthHeaders(apiKey) }
+    );
 
-    // Special handling for HTTP 201 status (Java endpoint)
-    if (response.status === 201) {
-      core.info(`📡 HTTP 201 detected - Java endpoint response`);
-      const locationHeader = response.headers['location'] || response.headers['Location'];
-      if (locationHeader) {
-        core.info(`📡 Location header: ${locationHeader}`);
-        // Extract ID from Location header like "/api/upload/build/12345"
-        const idMatch = locationHeader.match(/\/(\d+)$/);
-        if (idMatch) {
-          const extractedId = idMatch[1];
-          core.info(`📡 Extracted ID from Location header: ${extractedId}`);
-          (response as any).data = parseInt(extractedId);
-          core.info(`📡 Converted response data to numeric ID: ${response.data}`);
-        }
-      }
-    }
-
-    core.endGroup();
-
-    return response.data;
-  } catch (error: any) {
-    core.startGroup('🔍 VERBOSE DEBUG - Upload Notification Error');
-    core.error(`📡 Error Type: ${error.constructor.name}`);
-    core.error(`📡 Error Message: ${error.message}`);
-
-    if (error.response) {
-      core.error(`📡 Error Response Status: ${error.response.status}`);
-      core.error(`📡 Error Response Status Text: ${error.response.statusText}`);
-      core.error(`📡 Error Response Headers:`);
-      Object.entries(error.response.headers || {}).forEach(([key, value]) => {
-        core.error(`  ${key}: ${value}`);
-      });
-      core.error(`📡 Error Response Data Type: ${typeof error.response.data}`);
-      core.error(`📡 Error Response Data: ${JSON.stringify(error.response.data, null, 2)}`);
-    } else if (error.request) {
-      core.error(`📡 Request was made but no response received`);
-      core.error(`📡 Request details: ${JSON.stringify(error.request, null, 2)}`);
-    } else {
-      core.error(`📡 Error in request setup: ${error.message}`);
-    }
-
-    if (error.config) {
-      core.error(`📡 Request Config:`);
-      core.error(`  URL: ${error.config.url}`);
-      core.error(`  Method: ${error.config.method}`);
-      core.error(`  Headers: ${JSON.stringify(error.config.headers, null, 2)}`);
-      core.error(`  Data: ${JSON.stringify(error.config.data, null, 2)}`);
-    }
-    core.endGroup();
-
-    throw error;
+    core.info('✅ Upload notification sent successfully');
+    return response;
+  } catch (error) {
+    throw new ApiError(
+      `Upload notification failed: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof ApiError ? error.status : undefined
+    );
   }
 }
 
 /**
- * Main action execution following the specified flow
+ * Main action execution with comprehensive error handling and security
  */
 export async function run(): Promise<void> {
   let uploadStatus = 'failed';
@@ -380,58 +339,53 @@ export async function run(): Promise<void> {
   try {
     core.info('🚀 Starting Hycos AI Build Log Uploader Action');
 
-    // Step 1: Parse and validate inputs
+    // Step 1: Parse and validate inputs with comprehensive validation
+    core.startGroup('📝 Input Validation');
     const inputs = getActionInputs();
-    core.info('✅ Action inputs validated');
+    core.info('✅ All action inputs validated successfully');
+    core.info(`  - API Endpoint: ${inputs.apiEndpoint}`);
+    core.info(`  - Retry Attempts: ${inputs.retryAttempts}`);
+    core.info(`  - Retry Delay: ${inputs.retryDelay}s`);
+    core.info(`  - S3 Log Path: ${inputs.s3LogPath}`);
+    core.endGroup();
 
-    // Step 2: Setup retry options
+    // Step 2: Initialize HTTP client with timeout and retry logic
+    const httpClient = new HttpClient({
+      baseURL: inputs.apiEndpoint,
+      timeout: 30000, // 30 seconds
+      retries: inputs.retryAttempts,
+      retryDelay: inputs.retryDelay * 1000,
+      maxRetryDelay: 30000,
+    });
+
+    // Step 3: Setup retry options for S3
     const retryOptions: RetryOptions = {
       maxAttempts: inputs.retryAttempts,
-      initialDelay: inputs.retryDelay * 1000, // Convert to milliseconds
-      maxDelay: 30000, // 30 seconds max delay
+      initialDelay: inputs.retryDelay * 1000,
+      maxDelay: 30000,
       backoffFactor: 2,
     };
 
-    // Step 3: Register CI server with Hycos API
-    core.startGroup('🏗️ Registering CI server');
-    try {
-      const serverAddress = process.env.GITHUB_SERVER_URL || 'https://github.com';
-      const registrationResponse = await registerServer(
-        inputs.apiEndpoint,
-        inputs.apiKey,
-        serverAddress,
-        'GITHUB_ACTIONS'
-      );
-      core.info('✅ CI server registered successfully');
-      if (registrationResponse.serverId) {
-        core.info(`📋 Server ID: ${registrationResponse.serverId}`);
-      }
-    } catch (error) {
-      throw new Error(
-        `Server registration failed: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-    core.endGroup();
+    // Step 4: Register CI server with Hycos API
+    const serverAddress = process.env.GITHUB_SERVER_URL || 'https://github.com';
+    await registerServer(
+      httpClient,
+      inputs.apiEndpoint,
+      inputs.apiKey,
+      serverAddress,
+      'GITHUB_ACTIONS'
+    );
 
-    // Step 4: Validate API key with cloud credentials
-    core.startGroup('🔐 Validating API key');
-    try {
-      await getCloudCredentials(inputs.apiEndpoint, inputs.apiKey);
-      core.info('✅ API key validated successfully');
-    } catch (error) {
-      throw new Error(
-        `API key validation failed: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-    core.endGroup();
+    // Step 5: Validate API key with cloud credentials
+    await getCloudCredentials(httpClient, inputs.apiKey);
 
-    // Step 5: Initialize GitHub client
+    // Step 6: Initialize GitHub client
     core.startGroup('🐙 Initializing GitHub client');
     const githubClient = new GitHubClient(inputs.githubToken);
-    core.info('✅ GitHub client initialized');
+    core.info('✅ GitHub client initialized successfully');
     core.endGroup();
 
-    // Step 6: Get workflow information
+    // Step 7: Get workflow information
     core.startGroup('📋 Fetching workflow information');
     const workflowRun = await githubClient.getWorkflowRun(inputs.workflowRunId);
     core.info(`Workflow: ${workflowRun.name}`);
@@ -493,12 +447,7 @@ export async function run(): Promise<void> {
 
     // Step 8: Get cloud credentials and upload logs to S3
     core.startGroup('☁️ Getting cloud credentials and uploading to S3');
-    const cloudCredentials = await getCloudCredentials(inputs.apiEndpoint, inputs.apiKey);
-
-    // Debug: Print credentials details (safely)
-    core.info(`🔑 Received temporary cloud credentials`);
-    core.info(`  - Bucket: ${cloudCredentials.bucket ? '[redacted]' : 'undefined'}`);
-    core.info(`  - Expiration: ${cloudCredentials.expiration ? '[redacted]' : 'undefined'}`);
+    const cloudCredentials = await getCloudCredentials(httpClient, inputs.apiKey);
 
     const s3Uploader = new S3Uploader(cloudCredentials, retryOptions);
     const uploadResults = await s3Uploader.uploadAllLogs(
@@ -548,7 +497,7 @@ export async function run(): Promise<void> {
     };
 
     const notificationResponse = await notifyUploadComplete(
-      inputs.apiEndpoint,
+      httpClient,
       inputs.apiKey,
       uploadedFiles,
       buildDetails,
@@ -595,36 +544,25 @@ export async function run(): Promise<void> {
     core.info('🎉 Secure Build Log Uploader completed successfully!');
     core.info(`📊 Summary: ${filesUploaded} files uploaded and API notified`);
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    core.setFailed(`Action failed: ${errorMessage}`);
+    // Use centralized error handling
+    try {
+      ErrorHandler.handleError(error, 'Action execution');
+    } catch (handledError) {
+      const errorMessage = handledError instanceof Error ? handledError.message : 'Unknown error';
+      core.setFailed(`Action failed: ${errorMessage}`);
 
-    // Set failure outputs
-    setActionOutputs({
-      analysisUrl,
-      analysisId,
-      s3Url,
-      uploadStatus,
-      filesUploaded,
-      notificationStatus,
-    });
+      // Set failure outputs
+      setActionOutputs({
+        analysisUrl,
+        analysisId,
+        s3Url,
+        uploadStatus,
+        filesUploaded,
+        notificationStatus,
+      });
 
-    // Log error details for debugging
-    core.error(`❌ Action failed with error: ${errorMessage}`);
-    if (error instanceof Error && error.stack) {
-      core.debug(`Error stack: ${error.stack}`);
+      throw handledError;
     }
-
-    // Provide helpful troubleshooting information
-    core.startGroup('🔍 Troubleshooting Information');
-    core.info('Please check the following:');
-    core.info('• API endpoint is correct and accessible');
-    core.info('• API key is valid and has proper permissions');
-    core.info('• GitHub token has necessary permissions');
-    core.info('• Network connectivity is stable');
-    core.info('• API service is operational');
-    core.endGroup();
-
-    throw error;
   }
 }
 
