@@ -257,7 +257,7 @@ export interface ServerRegistrationResponse {
 }
 
 /**
- * Upload notification response from API - new IdNameDtoCollapse format
+ * Upload notification response from API
  */
 export interface UploadNotificationResponse {
   id: number; // Analysis ID as integer

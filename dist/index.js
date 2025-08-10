@@ -73297,7 +73297,7 @@ async function getCloudCredentials(httpClient, apiKey) {
  * @param uploadedFiles - List of uploaded files
  * @param buildDetails - Build metadata
  * @param serverDetails - Server information
- * @returns Upload notification response with IdNameDtoCollapse format
+ * @returns Upload notification response
  */
 async function notifyUploadComplete(httpClient, apiKey, uploadedFiles, buildDetails, serverDetails) {
     try {
@@ -73456,7 +73456,7 @@ async function run() {
         };
         const notificationResponse = await notifyUploadComplete(httpClient, inputs.apiKey, uploadedFiles, buildDetails, serverDetails);
         notificationStatus = 'success';
-        // Handle new IdNameDtoCollapse response format
+        // Handle new API response format (id and name fields)
         analysisId = notificationResponse.id.toString();
         analysisUrl = `https://app.hycos.ai/ci-analysis/${notificationResponse.id}`;
         core.info('✅ Successfully notified API about upload completion');

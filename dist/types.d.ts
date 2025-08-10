@@ -234,7 +234,7 @@ export interface ServerRegistrationResponse {
     message?: string;
 }
 /**
- * Upload notification response from API - new IdNameDtoCollapse format
+ * Upload notification response from API
  */
 export interface UploadNotificationResponse {
     id: number;
