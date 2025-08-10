@@ -29,6 +29,17 @@ export class S3Uploader {
    * @param retryOptions - Optional retry configuration for failed uploads
    */
   constructor(credentials: CloudCredentialsResponse, retryOptions?: RetryOptions) {
+    // Validate that all required credentials are present
+    if (!credentials.bucket || credentials.bucket.trim() === '') {
+      throw new Error('S3 bucket name is required but was not provided in credentials');
+    }
+    if (!credentials.accessKeyId || credentials.accessKeyId.trim() === '') {
+      throw new Error('AWS Access Key ID is required but was not provided in credentials');
+    }
+    if (!credentials.secretAccessKey || credentials.secretAccessKey.trim() === '') {
+      throw new Error('AWS Secret Access Key is required but was not provided in credentials');
+    }
+    
     this.credentials = credentials;
     this.retryOptions = retryOptions || {
       maxAttempts: 3,
@@ -133,6 +144,7 @@ export class S3Uploader {
     return this.executeWithRetry(async () => {
       const s3Key = this.generateS3Key(workflowRunId, logContent.jobName, logContent.timestamp, s3LogPath);
       core.info(`Uploading log for job "${logContent.jobName}" to S3: ${s3Key}`);
+      core.debug(`S3 Upload - Bucket: ${this.credentials.bucket}, Key: ${s3Key}`);
 
       // Prepare metadata
       const metadata = {
@@ -143,6 +155,13 @@ export class S3Uploader {
         'upload-timestamp': new Date().toISOString(),
       };
 
+      // Ensure bucket name is valid before creating upload
+      if (!this.credentials.bucket) {
+        throw new Error('Bucket name is undefined or empty');
+      }
+      
+      core.debug(`Creating S3 Upload with Bucket: "${this.credentials.bucket}", Key: "${s3Key}"`);
+      
       // Use multipart upload for better reliability with large files
       const upload = new Upload({
         client: this.s3Client,

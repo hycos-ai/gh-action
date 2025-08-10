@@ -269,7 +269,15 @@ async function getCloudCredentials(
     // Log success without exposing credentials
     core.info('✅ Cloud credentials received successfully');
     core.info(`  - Bucket configured: ${response.bucket ? 'Yes' : 'No'}`);
+    if (response.bucket) {
+      core.info(`  - Bucket name: ${response.bucket}`);
+    }
     core.info(`  - Credentials expire: ${response.expiration ? 'Yes' : 'No'}`);
+    
+    // Validate that bucket is provided
+    if (!response.bucket || response.bucket.trim() === '') {
+      throw new ApiError('Cloud credentials response missing required bucket name');
+    }
 
     return response;
   } catch (error) {
