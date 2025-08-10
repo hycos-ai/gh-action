@@ -257,13 +257,11 @@ export interface ServerRegistrationResponse {
 }
 
 /**
- * Upload notification response from API
+ * Upload notification response from API - new IdNameDtoCollapse format
  */
 export interface UploadNotificationResponse {
-  success: boolean;
-  analysisId: string;
-  analysisUrl: string; // Always present: https://app.hycos.ai/ci-analysis/{analysisId}
-  message?: string;
+  id: number; // Analysis ID as integer
+  name: string; // Analysis name/identifier
 }
 
 /**

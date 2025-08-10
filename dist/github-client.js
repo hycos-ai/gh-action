@@ -15,23 +15,13 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GitHubClient = void 0;
 const core = __importStar(require("@actions/core"));
@@ -41,7 +31,15 @@ class GitHubClient {
     owner;
     repo;
     constructor(token) {
-        this.octokit = (0, github_1.getOctokit)(token);
+        // Align with GitHub Docs API versioning
+        this.octokit = (0, github_1.getOctokit)(token, {
+            request: {
+                headers: {
+                    'X-GitHub-Api-Version': '2022-11-28',
+                    Accept: 'application/vnd.github+json',
+                },
+            },
+        });
         // Get repository info from environment
         const repository = process.env.GITHUB_REPOSITORY;
         if (!repository) {
@@ -102,8 +100,27 @@ class GitHubClient {
                     },
                 };
             }
-            core.error(`Failed to fetch workflow run: ${error}`);
-            throw new Error(`Failed to fetch workflow run: ${error instanceof Error ? error.message : String(error)}`);
+            const envRunId = runId || process.env.GITHUB_RUN_ID;
+            const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
+            const workflowName = process.env.GITHUB_WORKFLOW || 'Unknown Workflow';
+            const now = new Date().toISOString();
+            if (!envRunId) {
+                throw new Error(`Failed to fetch workflow run and no fallback run ID available: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            core.warning(`Could not fetch workflow run from API; continuing with environment-based metadata: ${error instanceof Error ? error.message : String(error)}`);
+            return {
+                id: parseInt(envRunId, 10),
+                name: workflowName,
+                status: null,
+                conclusion: null,
+                created_at: now,
+                updated_at: now,
+                html_url: `${serverUrl}/${this.owner}/${this.repo}/actions/runs/${envRunId}`,
+                repository: {
+                    full_name: `${this.owner}/${this.repo}`,
+                    html_url: `${serverUrl}/${this.owner}/${this.repo}`,
+                },
+            };
         }
     }
     /**
@@ -128,8 +145,8 @@ class GitHubClient {
             }));
         }
         catch (error) {
-            core.error(`Failed to fetch workflow jobs: ${error}`);
-            throw new Error(`Failed to fetch workflow jobs: ${error instanceof Error ? error.message : String(error)}`);
+            core.warning(`Could not list jobs for workflow run ${runId}; continuing without job details: ${error instanceof Error ? error.message : String(error)}`);
+            return [];
         }
     }
     /**
@@ -143,26 +160,40 @@ class GitHubClient {
                 repo: this.repo,
                 job_id: jobId,
             });
-            // The response is a redirect URL to the actual logs
-            const logsResponse = await fetch(response.url);
-            if (!logsResponse.ok) {
-                throw new Error(`Failed to download logs: ${logsResponse.statusText}`);
+            // The response is a redirect URL to the actual logs with timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+            try {
+                const logsResponse = await fetch(response.url, {
+                    signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
+                if (!logsResponse.ok) {
+                    throw new Error(`Failed to download logs: ${logsResponse.statusText}`);
+                }
+                const logContent = await logsResponse.text();
+                return {
+                    jobName,
+                    jobId,
+                    content: logContent,
+                    timestamp: new Date().toISOString(),
+                };
             }
-            const logContent = await logsResponse.text();
-            return {
-                jobName,
-                jobId,
-                content: logContent,
-                timestamp: new Date().toISOString(),
-            };
+            catch (error) {
+                clearTimeout(timeoutId);
+                if (error instanceof Error && error.name === 'AbortError') {
+                    throw new Error('Log download timed out after 60 seconds');
+                }
+                throw error;
+            }
         }
         catch (error) {
-            core.warning(`Failed to download logs for job ${jobName}: ${error}`);
+            core.warning(`Failed to download logs for job ${jobName}; continuing without logs: ${error instanceof Error ? error.message : String(error)}`);
             // Return empty content instead of failing completely
             return {
                 jobName,
                 jobId,
-                content: `Failed to download logs: ${error instanceof Error ? error.message : String(error)}`,
+                content: 'Log content unavailable',
                 timestamp: new Date().toISOString(),
             };
         }

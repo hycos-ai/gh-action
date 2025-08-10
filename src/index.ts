@@ -287,7 +287,7 @@ async function getCloudCredentials(
  * @param uploadedFiles - List of uploaded files
  * @param buildDetails - Build metadata
  * @param serverDetails - Server information
- * @returns Upload notification response
+ * @returns Upload notification response with IdNameDtoCollapse format
  */
 async function notifyUploadComplete(
   httpClient: HttpClient,
@@ -295,7 +295,7 @@ async function notifyUploadComplete(
   uploadedFiles: UploadedFile[],
   buildDetails: BuildDetails,
   serverDetails: ServerDetails
-): Promise<UploadNotificationResponse | number | string> {
+): Promise<UploadNotificationResponse> {
   try {
     core.startGroup('📢 Upload Notification');
     core.info(`📡 Notifying API about ${uploadedFiles.length} uploaded files`);
@@ -309,13 +309,15 @@ async function notifyUploadComplete(
       serverDetails,
     };
 
-    const response = await httpClient.post<UploadNotificationResponse | number | string>(
+    const response = await httpClient.post<UploadNotificationResponse>(
       '/api/upload/uploaded',
       payload,
       { headers: HttpClient.createAuthHeaders(apiKey) }
     );
 
     core.info('✅ Upload notification sent successfully');
+    core.info(`📋 Analysis ID: ${response.id}`);
+    core.info(`📋 Analysis Name: ${response.name}`);
     return response;
   } catch (error) {
     throw new ApiError(
@@ -506,23 +508,9 @@ export async function run(): Promise<void> {
 
     notificationStatus = 'success';
 
-    // Handle different response types from the backend
-    if (typeof notificationResponse === 'number') {
-      // Java backend returns numeric buildDetailsId
-      analysisId = notificationResponse.toString();
-      analysisUrl = `https://app.hycos.ai/ci-analysis/${notificationResponse}`;
-      core.info(`📡 Constructed analysis URL from numeric ID: ${analysisUrl}`);
-    } else if (typeof notificationResponse === 'object' && notificationResponse !== null) {
-      // Standard JSON response format
-      const responseObj = notificationResponse as UploadNotificationResponse;
-      analysisId = responseObj.analysisId || '';
-      analysisUrl = responseObj.analysisUrl || '';
-    } else {
-      // Fallback for other response types
-      core.warning(`📡 Unexpected response type: ${typeof notificationResponse}`);
-      analysisId = 'unknown';
-      analysisUrl = '';
-    }
+    // Handle new IdNameDtoCollapse response format
+    analysisId = notificationResponse.id.toString();
+    analysisUrl = `https://app.hycos.ai/ci-analysis/${notificationResponse.id}`;
 
     core.info('✅ Successfully notified API about upload completion');
     core.info(`🔍 Analysis ID: ${analysisId}`);

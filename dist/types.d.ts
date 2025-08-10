@@ -234,13 +234,11 @@ export interface ServerRegistrationResponse {
     message?: string;
 }
 /**
- * Upload notification response from API
+ * Upload notification response from API - new IdNameDtoCollapse format
  */
 export interface UploadNotificationResponse {
-    success: boolean;
-    analysisId: string;
-    analysisUrl: string;
-    message?: string;
+    id: number;
+    name: string;
 }
 /**
  * Generic API response wrapper
