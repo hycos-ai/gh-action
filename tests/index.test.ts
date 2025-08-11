@@ -23,7 +23,7 @@ describe('Hycos AI GitHub Action', () => {
     mockGetInput.mockImplementation((name: string) => {
       const inputs: Record<string, string> = {
         'api-key': 'hycos_api_key_123456789',
-        'api-endpoint': 'https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev',
+        'api-endpoint': 'https://lnjh7eud9a.execute-api.us-east-1.amazonaws.com/dev',
         'github-token': 'ghp_1234567890abcdefghijklmnopqrstuv123',
         'workflow-run-id': '',
         'retry-attempts': '3',

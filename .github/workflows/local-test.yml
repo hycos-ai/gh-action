@@ -43,5 +43,5 @@ jobs:
         if: always()
         with:
           api-key: ${{ secrets.HYCOS_API_KEY }}
-          api-endpoint: 'https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev'
+          api-endpoint: 'https://lnjh7eud9a.execute-api.us-east-1.amazonaws.com/dev'
           github-token: ${{ secrets.GITHUB_TOKEN }}

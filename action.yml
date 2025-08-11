@@ -9,7 +9,7 @@ inputs:
   api-endpoint:
     description: 'Base URL for the Hycos AI API endpoints'
     required: false
-    default: 'https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev'
+    default: 'https://lnjh7eud9a.execute-api.us-east-1.amazonaws.com/dev'
     # TODO: Change to 'https://api.hycos.ai' when available
   github-token:
     description: 'GitHub token for accessing workflow runs and logs'

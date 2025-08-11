@@ -29,7 +29,7 @@ Uses X-API-Key header authentication:
 5. Display analysis URL: `https://app.hycos.ai/ci-analysis/{analysisId}`
 
 ## API Endpoints
-- Base URL: `https://55k1jx7y6e.execute-api.us-east-1.amazonaws.com/dev`
+- Base URL: `https://lnjh7eud9a.execute-api.us-east-1.amazonaws.com/dev`
 - Server Registration: `POST /build/server` (needs API Gateway config)
 - Credentials: `GET /api/upload/cloud/credentials` ✅
 - Upload Notification: `POST /api/upload/uploaded` ✅
