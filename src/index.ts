@@ -18,7 +18,7 @@ import {
   UploadNotificationResponse,
 } from './types';
 
-const DEFAULT_API_BASE_URL = 'https://api.hycos.ai';
+const DEFAULT_API_BASE_URL = 'https://grgikf0un8.execute-api.us-east-1.amazonaws.com/dev2';
 
 /**
  * Parse and validate action inputs from environment variables

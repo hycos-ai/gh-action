@@ -73081,7 +73081,7 @@ const s3_uploader_1 = __nccwpck_require__(42134);
 const http_client_1 = __nccwpck_require__(6921);
 const input_validator_1 = __nccwpck_require__(77025);
 const error_handler_1 = __nccwpck_require__(32836);
-const DEFAULT_API_BASE_URL = 'https://api.hycos.ai';
+const DEFAULT_API_BASE_URL = 'https://grgikf0un8.execute-api.us-east-1.amazonaws.com/dev2';
 /**
  * Parse and validate action inputs from environment variables
  * @returns Validated action inputs
