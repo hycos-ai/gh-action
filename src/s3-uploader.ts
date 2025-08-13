@@ -143,8 +143,7 @@ export class S3Uploader {
   ): Promise<S3UploadResult> {
     return this.executeWithRetry(async () => {
       const s3Key = this.generateS3Key(workflowRunId, logContent.jobName, logContent.timestamp, s3LogPath);
-      core.info(`Uploading log for job "${logContent.jobName}" to S3: ${s3Key}`);
-      core.debug(`S3 Upload - Bucket: ${this.credentials.bucket}, Key: ${s3Key}`);
+      core.debug(`Uploading ${logContent.jobName} log`);
 
       // Prepare metadata
       const metadata = {
@@ -159,8 +158,6 @@ export class S3Uploader {
       if (!this.credentials.bucket) {
         throw new Error('Bucket name is undefined or empty');
       }
-      
-      core.debug(`Creating S3 Upload with Bucket: "${this.credentials.bucket}", Key: "${s3Key}"`);
       
       // Use multipart upload for better reliability with large files
       const upload = new Upload({
@@ -180,14 +177,6 @@ export class S3Uploader {
         leavePartsOnError: false,
       });
 
-      // Add progress tracking
-      upload.on('httpUploadProgress', progress => {
-        if (progress.total && progress.loaded !== undefined) {
-          const percentage = Math.round((progress.loaded / progress.total) * 100);
-          core.info(`Upload progress for ${logContent.jobName}: ${percentage}%`);
-        }
-      });
-
       const result = await upload.done();
 
       const s3Result: S3UploadResult = {
@@ -197,7 +186,7 @@ export class S3Uploader {
         etag: (result as any).ETag || '',
       };
 
-      core.info(`✅ Successfully uploaded log for job "${logContent.jobName}"`);
+      core.debug(`✅ Uploaded ${logContent.jobName}`);
       return s3Result;
     }, `Upload log for job "${logContent.jobName}"`);
   }

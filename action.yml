@@ -1,5 +1,5 @@
 name: 'Hycos AI Log Analyzer'
-description: 'Uploads GitHub build logs to S3 for AI-powered analysis and debugging insights'
+description: 'Uploads GitHub build logs for AI-powered analysis and debugging insights'
 author: 'Hycos AI'
 
 inputs:
@@ -41,7 +41,7 @@ outputs:
   files-uploaded:
     description: 'Number of files uploaded'
   s3-url:
-    description: 'S3 URL where logs were uploaded'
+    description: 'Storage URL where logs were uploaded'
   notification-status:
     description: 'Status of the upload notification (success, failed)'
 
