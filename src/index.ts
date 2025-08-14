@@ -10,9 +10,6 @@ import {
   BuildDetails,
   CloudCredentialsResponse,
   RetryOptions,
-  ServerDetails,
-  ServerRegistrationRequest,
-  ServerRegistrationResponse,
   UploadedFile,
   UploadNotificationRequest,
   UploadNotificationResponse,
@@ -110,45 +107,6 @@ async function displayBuildMetadata(workflowRun: {
   core.info(`📦 Branch: ${env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME || 'unknown'}`);
 }
 
-/**
- * Register CI server with Hycos API using API key
- * @param httpClient - HTTP client instance
- * @param apiEndpoint - API base endpoint
- * @param apiKey - API authentication key  
- * @param serverAddress - Server address
- * @param serverType - Type of CI server
- * @returns Server registration response
- */
-async function registerServer(
-  httpClient: HttpClient,
-  apiEndpoint: string,
-  apiKey: string,
-  serverAddress: string,
-  serverType: 'GITHUB_ACTIONS'
-): Promise<ServerRegistrationResponse> {
-  try {
-    core.info('🔍 Registering CI server');
-
-    const payload: ServerRegistrationRequest = {
-      serverAddress,
-      type: serverType,
-    };
-
-    const response = await httpClient.post<ServerRegistrationResponse>(
-      '/build/server',
-      payload,
-      { headers: HttpClient.createAuthHeaders(apiKey) }
-    );
-
-    core.info('✅ Server registered successfully');
-    return response;
-  } catch (error) {
-    throw new ApiError(
-      `Server registration failed: ${error instanceof Error ? error.message : String(error)}`,
-      error instanceof ApiError ? error.status : undefined
-    );
-  }
-}
 
 /**
  * Get cloud credentials from Hycos API using API key
@@ -188,15 +146,13 @@ async function getCloudCredentials(
  * @param apiKey - API authentication key
  * @param uploadedFiles - List of uploaded files
  * @param buildDetails - Build metadata
- * @param serverDetails - Server information
  * @returns Upload notification response
  */
 async function notifyUploadComplete(
   httpClient: HttpClient,
   apiKey: string,
   uploadedFiles: UploadedFile[],
-  buildDetails: BuildDetails,
-  serverDetails: ServerDetails
+  buildDetails: BuildDetails
 ): Promise<UploadNotificationResponse> {
   try {
     core.info(`📡 Notifying API about ${uploadedFiles.length} uploaded files`);
@@ -204,7 +160,6 @@ async function notifyUploadComplete(
     const payload: UploadNotificationRequest = {
       files: uploadedFiles,
       buildDetails,
-      serverDetails,
     };
 
     const response = await httpClient.post<UploadNotificationResponse>(
@@ -258,9 +213,7 @@ export async function run(): Promise<void> {
       backoffFactor: 2,
     };
 
-    // Register CI server and validate credentials
-    const serverAddress = process.env.GITHUB_SERVER_URL || 'https://github.com';
-    await registerServer(httpClient, inputs.apiEndpoint, inputs.apiKey, serverAddress, 'GITHUB_ACTIONS');
+    // Validate credentials
     await getCloudCredentials(httpClient, inputs.apiKey);
 
     // Initialize GitHub client and get workflow info
@@ -351,17 +304,11 @@ export async function run(): Promise<void> {
       },
     };
 
-    const serverDetails: ServerDetails = {
-      serverAddress: process.env.GITHUB_SERVER_URL || 'https://github.com',
-      type: 'GITHUB_ACTIONS' as const,
-    };
-
     const notificationResponse = await notifyUploadComplete(
       httpClient,
       inputs.apiKey,
       uploadedFiles,
-      buildDetails,
-      serverDetails
+      buildDetails
     );
 
     notificationStatus = 'success';
