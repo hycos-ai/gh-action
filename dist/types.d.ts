@@ -58,19 +58,11 @@ export interface BuildDetails {
     metadata: BuildMetadata;
 }
 /**
- * Server details for notification
- */
-export interface ServerDetails {
-    serverAddress: string;
-    type: 'JENKINS' | 'TEAM_CITY' | 'CIRCLE_CI' | 'GITHUB_ACTIONS';
-}
-/**
  * Upload notification request payload
  */
 export interface UploadNotificationRequest {
     files: UploadedFile[];
     buildDetails: BuildDetails;
-    serverDetails: ServerDetails;
 }
 /**
  * API Error response structure
@@ -217,21 +209,6 @@ export interface TokenStorage {
     setToken(token: string): void;
     clearToken(): void;
     isTokenValid(): boolean;
-}
-/**
- * Server registration request payload
- */
-export interface ServerRegistrationRequest {
-    serverAddress: string;
-    type: 'JENKINS' | 'TEAM_CITY' | 'CIRCLE_CI' | 'GITHUB_ACTIONS';
-}
-/**
- * Server registration response from API
- */
-export interface ServerRegistrationResponse {
-    success: boolean;
-    serverId?: string;
-    message?: string;
 }
 /**
  * Upload notification response from API
