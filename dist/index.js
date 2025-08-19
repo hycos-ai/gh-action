@@ -73304,6 +73304,7 @@ async function run() {
                 triggeredBy: process.env.GITHUB_ACTOR || 'unknown',
                 buildStatus: workflowRun.conclusion || 'unknown',
             },
+            buildServerType: 'GITHUB_ACTIONS',
         };
         const notificationResponse = await notifyUploadComplete(httpClient, inputs.apiKey, uploadedFiles, buildDetails);
         notificationStatus = 'success';

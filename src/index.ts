@@ -302,6 +302,7 @@ export async function run(): Promise<void> {
         triggeredBy: process.env.GITHUB_ACTOR || 'unknown',
         buildStatus: workflowRun.conclusion || 'unknown',
       },
+      buildServerType: 'GITHUB_ACTIONS',
     };
 
     const notificationResponse = await notifyUploadComplete(

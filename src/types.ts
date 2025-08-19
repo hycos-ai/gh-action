@@ -41,7 +41,7 @@ export interface UploadedFile {
 }
 
 /**
- * Build metadata for notification with specific required fields
+ * Build metadata for notification with flexible properties
  */
 export interface BuildMetadata {
   jobName: string;
@@ -57,10 +57,16 @@ export interface BuildMetadata {
 }
 
 /**
- * Build details for notification
+ * Build server types supported by the API
+ */
+export type BuildServerType = 'JENKINS' | 'TEAM_CITY' | 'CIRCLE_CI' | 'GITHUB_ACTIONS' | 'GITLAB_CI' | 'BITBUCKET';
+
+/**
+ * Build details for notification with new API structure
  */
 export interface BuildDetails {
   metadata: BuildMetadata;
+  buildServerType: BuildServerType;
 }
 
 
