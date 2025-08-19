@@ -73262,9 +73262,19 @@ async function run() {
         // Display build metadata
         await displayBuildMetadata(workflowRun);
         // Download workflow logs
-        const logs = await githubClient.getAllWorkflowLogs(workflowRun.id);
+        const allLogs = await githubClient.getAllWorkflowLogs(workflowRun.id);
+        // Filter out empty or minimal logs
+        const logs = allLogs.filter(log => {
+            const trimmedContent = log.content.trim();
+            // Skip logs that are empty, only contain "Log content unavailable", or are too small (< 10 chars)
+            if (!trimmedContent || trimmedContent.length < 10 || trimmedContent === 'Log content unavailable') {
+                core.info(`Skipping empty/minimal log for job: ${log.jobName}`);
+                return false;
+            }
+            return true;
+        });
         if (logs.length === 0) {
-            core.warning('No logs found for workflow run');
+            core.warning('No valid logs found for workflow run (all logs were empty or minimal)');
             setActionOutputs({
                 analysisUrl: '',
                 analysisId: '',
@@ -73274,6 +73284,9 @@ async function run() {
                 notificationStatus: 'not-attempted',
             });
             return;
+        }
+        if (allLogs.length > logs.length) {
+            core.info(`Filtered out ${allLogs.length - logs.length} empty/minimal logs, processing ${logs.length} valid logs`);
         }
         const totalLogSize = logs.reduce((sum, log) => sum + log.content.length, 0);
         core.info(`📄 Processing ${logs.length} log files (${(totalLogSize / 1024 / 1024).toFixed(2)} MB)`);
