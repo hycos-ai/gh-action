@@ -1,6 +1,6 @@
 {
   "name": "hycos-ai-github-action",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "Hycos AI GitHub Action for intelligent build log analysis",
   "main": "dist/index.js",
   "scripts": {
