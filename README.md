@@ -1,13 +1,13 @@
 # Hycos AI GitHub Action
 
-Automatically upload your GitHub Actions build logs to Hycos AI for intelligent analysis and debugging insights.
+Automatically analyze your GitHub Actions build logs with Hycos AI for intelligent insights and debugging assistance.
 
 ## 🚀 Features
 
-- **Automatic Log Upload**: Securely uploads build logs to S3 when builds fail
-- **AI-Powered Analysis**: Get intelligent insights about build failures
+- **Automatic Log Analysis**: Securely processes build logs when builds fail
+- **AI-Powered Insights**: Get intelligent recommendations for build failures
 - **Zero Configuration**: Works out of the box with minimal setup
-- **Secure**: Uses temporary AWS credentials and API key authentication
+- **Enterprise Security**: Secure API key authentication and data handling
 - **Rich Integration**: Displays analysis links in job summaries and outputs
 
 ## 📋 Quick Start
@@ -75,8 +75,8 @@ jobs:
 |--------|-------------|
 | `analysis-url` | Direct link to analysis: `https://app.hycos.ai/ci-analysis/{id}` |
 | `analysis-id` | Unique analysis identifier |
-| `upload-status` | Process status (`success`/`failed`) |
-| `files-uploaded` | Number of files processed |
+| `analysis-status` | Analysis status (`success`/`failed`) |
+| `files-processed` | Number of files analyzed |
 
 ## 📊 Example with Outputs
 
