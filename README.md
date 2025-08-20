@@ -14,7 +14,7 @@ Automatically analyze your GitHub Actions build logs with Hycos AI for intellige
 
 1. **Get your Hycos AI API key**:
    - Sign up at [app.hycos.ai](https://app.hycos.ai)
-   - Navigate to Settings → API Keys
+   - Navigate to My Account → API Keys
    - Generate a new API key for GitHub Actions
 
 2. **Add API key to repository secrets**:
@@ -125,7 +125,6 @@ jobs:
 - uses: hycos-ai/github-action@v2
   with:
     api-key: ${{ secrets.HYCOS_API_KEY }}
-    api-endpoint: 'https://your-enterprise.hycos.ai'
 ```
 
 ### Conditional Analysis
@@ -136,18 +135,6 @@ jobs:
   with:
     api-key: ${{ secrets.HYCOS_API_KEY }}
 ```
-
-## 📚 Documentation
-
-- [Setup Guide](https://docs.hycos.ai/github-actions)
-- [API Documentation](https://docs.hycos.ai/api)
-- [Troubleshooting](https://docs.hycos.ai/troubleshooting)
-
-## 🐛 Issues & Support
-
-Found a bug or need help? 
-- [Create an issue](https://github.com/hycos-ai/github-action/issues)
-- [Contact support](mailto:support@hycos.ai)
 
 ## 📄 License
 
