@@ -7,10 +7,9 @@ inputs:
     description: 'Hycos AI API authentication key'
     required: true
   api-endpoint:
-    description: 'Base URL for the Hycos AI API endpoints'
+    description: 'Base URL for the Hycos AI API endpoints (for enterprise users)'
     required: false
     default: 'https://grgikf0un8.execute-api.us-east-1.amazonaws.com/dev2'
-    # TODO: Change to 'https://api.hycos.ai' when available
   github-token:
     description: 'GitHub token for accessing workflow runs and logs'
     required: true
@@ -18,18 +17,6 @@ inputs:
   workflow-run-id:
     description: 'Specific workflow run ID to analyze (optional, defaults to current run)'
     required: false
-  retry-attempts:
-    description: 'Number of retry attempts for failed operations'
-    required: false
-    default: '3'
-  retry-delay:
-    description: 'Initial delay between retries in seconds'
-    required: false
-    default: '2'
-  s3-log-path:
-    description: 'Custom S3 path prefix for log storage'
-    required: false
-    default: 'logs'
 
 outputs:
   analysis-url:
@@ -37,13 +24,9 @@ outputs:
   analysis-id:
     description: 'Unique analysis identifier'
   upload-status:
-    description: 'Status of the upload process (success, failed)'
+    description: 'Status of the process (success, failed)'
   files-uploaded:
-    description: 'Number of files uploaded'
-  s3-url:
-    description: 'Storage URL where logs were uploaded'
-  notification-status:
-    description: 'Status of the upload notification (success, failed)'
+    description: 'Number of files processed'
 
 runs:
   using: 'node20'

@@ -12,16 +12,21 @@ Automatically upload your GitHub Actions build logs to Hycos AI for intelligent 
 
 ## 📋 Quick Start
 
-1. **Get your Hycos AI API key** from [app.hycos.ai](https://app.hycos.ai)
+1. **Get your Hycos AI API key**:
+   - Sign up at [app.hycos.ai](https://app.hycos.ai)
+   - Navigate to Settings → API Keys
+   - Generate a new API key for GitHub Actions
 
-2. **Add API key to repository secrets**: 
-   - Go to Settings → Secrets → Actions
-   - Add secret named `HYCOS_API_KEY`
+2. **Add API key to repository secrets**:
+   - Go to your repository's Settings → Secrets and variables → Actions
+   - Click "New repository secret"
+   - Name: `HYCOS_API_KEY`
+   - Value: Your API key from step 1
 
 3. **Add to your workflow**:
 
 ```yaml
-name: Build and Test
+name: CI Pipeline
 on: [push, pull_request]
 
 jobs:
@@ -29,17 +34,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build and Test
-        run: |
-          # Your build commands here
-          npm ci
-          npm run build
-          npm test
       
-      # Add Hycos AI analysis (runs on failure)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install Dependencies
+        run: npm ci
+      
+      - name: Run Tests
+        run: npm test
+      
+      - name: Build Project  
+        run: npm run build
+      
+      # Hycos AI analysis runs automatically on failures
       - name: Hycos AI Analysis
-        if: always() # Run even if previous steps failed
-        uses: hycos-ai/github-action@v1
+        if: always()
+        uses: hycos-ai/github-action@v2
         with:
           api-key: ${{ secrets.HYCOS_API_KEY }}
 ```
@@ -50,13 +64,10 @@ jobs:
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `api-key` | Hycos AI API key | ✅ Yes | - |
-| `api-endpoint` | API endpoint URL | ❌ No | `https://api.hycos.ai` |
-| `github-token` | GitHub token | ❌ No | `${{ github.token }}` |
-| `workflow-run-id` | Specific run ID to analyze | ❌ No | Current run |
-| `retry-attempts` | Number of retry attempts | ❌ No | `3` |
-| `retry-delay` | Retry delay in seconds | ❌ No | `2` |
-| `s3-log-path` | Custom S3 path prefix | ❌ No | `logs` |
+| `api-key` | Hycos AI API key from repository secrets | ✅ Yes | - |
+| `api-endpoint` | API endpoint URL (for enterprise users) | ❌ No | Auto-configured |
+| `github-token` | GitHub token for API access | ❌ No | `${{ github.token }}` |
+| `workflow-run-id` | Specific workflow run ID to analyze | ❌ No | Current run |
 
 ### Outputs
 
@@ -64,10 +75,8 @@ jobs:
 |--------|-------------|
 | `analysis-url` | Direct link to analysis: `https://app.hycos.ai/ci-analysis/{id}` |
 | `analysis-id` | Unique analysis identifier |
-| `upload-status` | Upload status (`success`/`failed`) |
-| `files-uploaded` | Number of files uploaded |
-| `s3-url` | S3 location of uploaded logs |
-| `notification-status` | Notification status (`success`/`failed`) |
+| `upload-status` | Process status (`success`/`failed`) |
+| `files-uploaded` | Number of files processed |
 
 ## 📊 Example with Outputs
 
@@ -75,13 +84,13 @@ jobs:
 - name: Hycos AI Analysis
   id: hycos
   if: always()
-  uses: hycos-ai/github-action@v1
+  uses: hycos-ai/github-action@v2
   with:
     api-key: ${{ secrets.HYCOS_API_KEY }}
 
 - name: Comment on PR
   if: failure() && github.event_name == 'pull_request'
-  uses: actions/github-script@v6
+  uses: actions/github-script@v7
   with:
     script: |
       github.rest.issues.createComment({
@@ -94,34 +103,35 @@ jobs:
 
 ## 🛡️ Security
 
-- **API Key**: Store in GitHub repository secrets
-- **Temporary Credentials**: Uses short-lived AWS credentials
-- **No Data Exposure**: No sensitive data logged or exposed
-- **Secure Upload**: Server-side encryption (AES256)
+- **API Key Protection**: Always store API keys in GitHub repository secrets, never in code
+- **Secure Processing**: Uses secure cloud infrastructure for log analysis
+- **Data Privacy**: No sensitive data is logged, exposed, or stored permanently
+- **Encryption**: End-to-end encryption for all data transmission
+- **Access Control**: Fine-grained permissions and audit logging
+- **SOC 2 Compliance**: Meets enterprise security standards
 
 ## 🔍 How It Works
 
 1. **Detects Build Status**: Only processes failed builds (unless forced)
-2. **Downloads Logs**: Securely retrieves build logs via GitHub API
-3. **Uploads to S3**: Uses temporary AWS credentials for secure upload
-4. **Triggers Analysis**: Notifies Hycos AI backend to start analysis
+2. **Retrieves Logs**: Securely accesses build logs via GitHub API
+3. **Processes Data**: Sends logs to Hycos AI for intelligent analysis
+4. **Triggers Analysis**: Initiates AI-powered log analysis
 5. **Displays Results**: Shows analysis link in job summary and outputs
 
 ## 💡 Advanced Usage
 
 ### Enterprise Setup
 ```yaml
-- uses: hycos-ai/github-action@v1
+- uses: hycos-ai/github-action@v2
   with:
     api-key: ${{ secrets.HYCOS_API_KEY }}
     api-endpoint: 'https://your-enterprise.hycos.ai'
-    s3-log-path: 'enterprise-logs'
-    retry-attempts: 5
 ```
 
 ### Conditional Analysis
 ```yaml
-- uses: hycos-ai/github-action@v1
+# Only analyze failed builds on main branch
+- uses: hycos-ai/github-action@v2
   if: failure() && github.ref == 'refs/heads/main'
   with:
     api-key: ${{ secrets.HYCOS_API_KEY }}
