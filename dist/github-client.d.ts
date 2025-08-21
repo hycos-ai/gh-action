@@ -9,6 +9,10 @@ export declare class GitHubClient {
      */
     getWorkflowRun(runId?: string): Promise<WorkflowRun>;
     /**
+     * Wait for workflow run to complete and get final conclusion
+     */
+    waitForWorkflowCompletion(runId?: string, maxWaitTimeMs?: number): Promise<WorkflowRun>;
+    /**
      * Get all jobs for a workflow run
      */
     getWorkflowJobs(runId: number): Promise<Job[]>;

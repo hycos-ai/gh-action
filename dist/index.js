@@ -72935,6 +72935,37 @@ class GitHubClient {
         }
     }
     /**
+     * Wait for workflow run to complete and get final conclusion
+     */
+    async waitForWorkflowCompletion(runId, maxWaitTimeMs = 300000) {
+        const startTime = Date.now();
+        const pollInterval = 10000; // 10 seconds
+        core.info(`Waiting for workflow to complete (max ${maxWaitTimeMs / 1000}s)...`);
+        while (Date.now() - startTime < maxWaitTimeMs) {
+            const workflowRun = await this.getWorkflowRun(runId);
+            // If we have a conclusion, the workflow is complete
+            if (workflowRun.conclusion) {
+                core.info(`✅ Workflow completed with conclusion: ${workflowRun.conclusion}`);
+                return workflowRun;
+            }
+            // If status is completed but no conclusion, it might be an API delay
+            if (workflowRun.status === 'completed') {
+                core.info(`Workflow status is completed, waiting for conclusion...`);
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Short wait for API consistency
+                const finalRun = await this.getWorkflowRun(runId);
+                if (finalRun.conclusion) {
+                    core.info(`✅ Workflow completed with conclusion: ${finalRun.conclusion}`);
+                    return finalRun;
+                }
+            }
+            core.info(`Workflow status: ${workflowRun.status || 'unknown'}, waiting ${pollInterval / 1000}s...`);
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+        // Timeout reached, get final state
+        core.warning(`⏰ Timeout waiting for workflow completion after ${maxWaitTimeMs / 1000}s`);
+        return this.getWorkflowRun(runId);
+    }
+    /**
      * Get all jobs for a workflow run
      */
     async getWorkflowJobs(runId) {
@@ -73083,6 +73114,21 @@ const input_validator_1 = __nccwpck_require__(77025);
 const error_handler_1 = __nccwpck_require__(32836);
 const DEFAULT_API_BASE_URL = 'https://grgikf0un8.execute-api.us-east-1.amazonaws.com/dev2';
 /**
+ * Collect usage analytics data from GitHub environment variables
+ * @returns Usage analytics data
+ */
+function collectUsageData() {
+    return {
+        repository: process.env.GITHUB_REPOSITORY || 'unknown',
+        owner: process.env.GITHUB_REPOSITORY_OWNER || 'unknown',
+        actionVersion: process.env.GITHUB_ACTION_REF || 'unknown',
+        runId: process.env.GITHUB_RUN_ID || 'unknown',
+        workflow: process.env.GITHUB_WORKFLOW || 'unknown',
+        actor: process.env.GITHUB_ACTOR || 'unknown',
+        timestamp: new Date().toISOString(),
+    };
+}
+/**
  * Parse and validate action inputs from environment variables
  * @returns Validated action inputs
  */
@@ -73128,12 +73174,6 @@ function setActionOutputs(outputs) {
     core.setOutput('files-uploaded', outputs.filesUploaded.toString());
     core.setOutput('s3-url', outputs.s3Url);
     core.setOutput('notification-status', outputs.notificationStatus);
-}
-/**
- * Display content in a simple format
- */
-function displayInfo(title, content) {
-    core.info(`🔍 ${title}: ${content}`);
 }
 /**
  * Display the analysis link in logs and GitHub job summary
@@ -73196,6 +73236,8 @@ async function notifyUploadComplete(httpClient, apiKey, uploadedFiles, buildDeta
         const payload = {
             files: uploadedFiles,
             buildDetails,
+            // Add usage analytics to the payload
+            usageData: collectUsageData(),
         };
         const response = await httpClient.post('/api/upload/uploaded', payload, { headers: http_client_1.HttpClient.createAuthHeaders(apiKey) });
         core.info(`✅ Notification sent - Analysis ID: ${response.id}`);
@@ -73220,6 +73262,9 @@ async function run() {
         // Parse and validate inputs
         const inputs = getActionInputs();
         core.info('✅ Inputs validated');
+        // Collect usage analytics
+        const usageData = collectUsageData();
+        core.debug(`Usage tracking: ${JSON.stringify(usageData)}`);
         // Initialize HTTP client
         const httpClient = new http_client_1.HttpClient({
             baseURL: inputs.apiEndpoint,
@@ -73239,7 +73284,7 @@ async function run() {
         await getCloudCredentials(httpClient, inputs.apiKey);
         // Initialize GitHub client and get workflow info
         const githubClient = new github_client_1.GitHubClient(inputs.githubToken);
-        const workflowRun = await githubClient.getWorkflowRun(inputs.workflowRunId);
+        const workflowRun = await githubClient.waitForWorkflowCompletion(inputs.workflowRunId);
         core.info(`📋 Workflow: ${workflowRun.name} (${workflowRun.conclusion || workflowRun.status || 'running'})`);
         // Check if we're in act environment for testing
         const isActEnvironment = process.env.ACT === 'true';

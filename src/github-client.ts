@@ -120,6 +120,44 @@ export class GitHubClient {
   }
 
   /**
+   * Wait for workflow run to complete and get final conclusion
+   */
+  async waitForWorkflowCompletion(runId?: string, maxWaitTimeMs: number = 300000): Promise<WorkflowRun> {
+    const startTime = Date.now();
+    const pollInterval = 10000; // 10 seconds
+    
+    core.info(`Waiting for workflow to complete (max ${maxWaitTimeMs / 1000}s)...`);
+    
+    while (Date.now() - startTime < maxWaitTimeMs) {
+      const workflowRun = await this.getWorkflowRun(runId);
+      
+      // If we have a conclusion, the workflow is complete
+      if (workflowRun.conclusion) {
+        core.info(`✅ Workflow completed with conclusion: ${workflowRun.conclusion}`);
+        return workflowRun;
+      }
+      
+      // If status is completed but no conclusion, it might be an API delay
+      if (workflowRun.status === 'completed') {
+        core.info(`Workflow status is completed, waiting for conclusion...`);
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Short wait for API consistency
+        const finalRun = await this.getWorkflowRun(runId);
+        if (finalRun.conclusion) {
+          core.info(`✅ Workflow completed with conclusion: ${finalRun.conclusion}`);
+          return finalRun;
+        }
+      }
+      
+      core.info(`Workflow status: ${workflowRun.status || 'unknown'}, waiting ${pollInterval / 1000}s...`);
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+    
+    // Timeout reached, get final state
+    core.warning(`⏰ Timeout waiting for workflow completion after ${maxWaitTimeMs / 1000}s`);
+    return this.getWorkflowRun(runId);
+  }
+
+  /**
    * Get all jobs for a workflow run
    */
   async getWorkflowJobs(runId: number): Promise<Job[]> {

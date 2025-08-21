@@ -71,11 +71,25 @@ export interface BuildDetails {
 
 
 /**
+ * Usage analytics data for tracking action usage
+ */
+export interface UsageData {
+  repository: string;
+  owner: string;
+  actionVersion: string;
+  runId: string;
+  workflow: string;
+  actor: string;
+  timestamp: string;
+}
+
+/**
  * Upload notification request payload
  */
 export interface UploadNotificationRequest {
   files: UploadedFile[];
   buildDetails: BuildDetails;
+  usageData?: UsageData;
 }
 
 /**

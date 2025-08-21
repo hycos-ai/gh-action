@@ -92,6 +92,10 @@ gh release create v2.x.x --title "Release Title" --notes "Release notes"
 4. **Enterprise Standards**: Maintain SOC 2 compliance features
 5. **User Experience**: Focus on simple, clear configuration for end users
 6. **Versioning**: Use semantic versioning for releases
+7. **MANDATORY QUALITY CHECKS**: After ANY code changes, ALWAYS run:
+   - `npm run lint` - Fix all linting errors before proceeding
+   - `npm run package` - Ensure build succeeds and dist files are updated
+   - NEVER commit without passing both lint and build checks
 
 ## Files to Never Commit
 - `.secrets` (removed for security)

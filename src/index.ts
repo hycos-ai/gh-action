@@ -13,9 +13,26 @@ import {
   UploadedFile,
   UploadNotificationRequest,
   UploadNotificationResponse,
+  UsageData,
 } from './types';
 
 const DEFAULT_API_BASE_URL = 'https://grgikf0un8.execute-api.us-east-1.amazonaws.com/dev2';
+
+/**
+ * Collect usage analytics data from GitHub environment variables
+ * @returns Usage analytics data
+ */
+function collectUsageData(): UsageData {
+  return {
+    repository: process.env.GITHUB_REPOSITORY || 'unknown',
+    owner: process.env.GITHUB_REPOSITORY_OWNER || 'unknown',
+    actionVersion: process.env.GITHUB_ACTION_REF || 'unknown',
+    runId: process.env.GITHUB_RUN_ID || 'unknown',
+    workflow: process.env.GITHUB_WORKFLOW || 'unknown',
+    actor: process.env.GITHUB_ACTOR || 'unknown',
+    timestamp: new Date().toISOString(),
+  };
+}
 
 /**
  * Parse and validate action inputs from environment variables
@@ -66,12 +83,6 @@ function setActionOutputs(outputs: ActionOutputs): void {
   core.setOutput('notification-status', outputs.notificationStatus);
 }
 
-/**
- * Display content in a simple format
- */
-function displayInfo(title: string, content: string): void {
-  core.info(`🔍 ${title}: ${content}`);
-}
 
 /**
  * Display the analysis link in logs and GitHub job summary
@@ -160,6 +171,8 @@ async function notifyUploadComplete(
     const payload: UploadNotificationRequest = {
       files: uploadedFiles,
       buildDetails,
+      // Add usage analytics to the payload
+      usageData: collectUsageData(),
     };
 
     const response = await httpClient.post<UploadNotificationResponse>(
@@ -196,6 +209,10 @@ export async function run(): Promise<void> {
     const inputs = getActionInputs();
     core.info('✅ Inputs validated');
 
+    // Collect usage analytics
+    const usageData = collectUsageData();
+    core.debug(`Usage tracking: ${JSON.stringify(usageData)}`);
+
     // Initialize HTTP client
     const httpClient = new HttpClient({
       baseURL: inputs.apiEndpoint,
@@ -218,7 +235,7 @@ export async function run(): Promise<void> {
 
     // Initialize GitHub client and get workflow info
     const githubClient = new GitHubClient(inputs.githubToken);
-    const workflowRun = await githubClient.getWorkflowRun(inputs.workflowRunId);
+    const workflowRun = await githubClient.waitForWorkflowCompletion(inputs.workflowRunId);
     core.info(`📋 Workflow: ${workflowRun.name} (${workflowRun.conclusion || workflowRun.status || 'running'})`);
 
     // Check if we're in act environment for testing
