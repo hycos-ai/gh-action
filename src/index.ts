@@ -372,7 +372,7 @@ export async function run(): Promise<void> {
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
   core.error(`Unhandled promise rejection at: ${promise}, reason: ${reason}`);
-  process.exit(1);
+  core.setFailed(`Unhandled promise rejection: ${reason}`);
 });
 
 // Handle uncaught exceptions
@@ -381,13 +381,12 @@ process.on('uncaughtException', error => {
   if (error.stack) {
     core.debug(`Exception stack: ${error.stack}`);
   }
-  process.exit(1);
+  core.setFailed(`Uncaught exception: ${error.message}`);
 });
 
 // Run the action
 if (require.main === module) {
   run().catch(error => {
     core.setFailed(`Action execution failed: ${error.message}`);
-    process.exit(1);
   });
 }
